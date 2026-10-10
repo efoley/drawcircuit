@@ -21,9 +21,9 @@ two track edges.
 
 `examples/` holds the test drawings with their JSON and overlays: two pencil
 photos with shadows (`s_curve_photo`, and `hand_drawn_circuit` whose road
-deliberately bulges to twice its width on one side), and four clean digital
-circuits with a narrow road (`complex_circuit`, `flowing_circuit`, `street_circuit` and
-`hairpin_circuit`, the last two with right-angle corners).
+deliberately bulges to twice its width on one side), and five clean digital
+circuits with a narrow road (`complex_circuit`, `flowing_circuit`, `street_circuit`,
+`hairpin_circuit` and `s_bend_circuit`, the last three with right-angle corners).
 
 ## Install and run
 

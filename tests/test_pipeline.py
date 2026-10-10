@@ -135,6 +135,7 @@ EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
     ("flowing_circuit.png", "circuit", 19.0),
     ("street_circuit.png", "circuit", 20.0),     # right-angle corners
     ("hairpin_circuit.png", "circuit", 21.0),    # square corners and a 180-degree stub
+    ("s_bend_circuit.png", "circuit", 21.3),     # square corners, a 180-degree stub and an S-bend
     ("hand_drawn_circuit.png", "circuit", 34.0), # pencil photo in shadow, with a deliberate bulge
 ])
 def test_real_examples(name, kind, width):
