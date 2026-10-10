@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, field
 
 import numpy as np
+from scipy.ndimage import gaussian_filter1d
 from scipy.spatial import cKDTree
 
 from . import bspline, geometry, reference
@@ -52,6 +54,42 @@ def _start_at(poly: np.ndarray, i: int) -> np.ndarray:
     return np.roll(poly, -int(i), axis=0)
 
 
+def straight_middle(poly: np.ndarray, max_turn: float = np.radians(10), scale: float = 15.0,
+                    spacing: float = 2.0) -> int:
+    """Index of the point halfway along the longest straight of a closed polyline.
+
+    A straight is a stretch over which the direction changes by at most
+    ``max_turn``, measured on the line smoothed over ~``scale`` px so that hand
+    jitter does not count. A track without straights gets its least curved stretch.
+    """
+    pts = geometry.resample(poly, spacing=spacing, closed=True)
+    n = len(pts)
+    smooth = gaussian_filter1d(pts, scale / spacing, axis=0, mode="wrap")
+    step = np.roll(smooth, -1, axis=0) - smooth
+    heading = np.unwrap(np.append(np.arctan2(step[:, 1], step[:, 0]), np.arctan2(step[0, 1], step[0, 0])))
+    h = np.concatenate([heading[:-1], heading[:-1] + heading[-1] - heading[0]])  # two laps
+    lo, hi = deque(), deque()  # indices of the window's minima / maxima, in order
+    best_len, best_start, i = 0, 0, 0
+    for j in range(len(h)):
+        while lo and h[lo[-1]] >= h[j]:
+            lo.pop()
+        lo.append(j)
+        while hi and h[hi[-1]] <= h[j]:
+            hi.pop()
+        hi.append(j)
+        while h[hi[0]] - h[lo[0]] > max_turn or j - i >= n:
+            i += 1
+            if lo[0] < i:
+                lo.popleft()
+            if hi[0] < i:
+                hi.popleft()
+        if j - i + 1 > best_len:
+            best_len, best_start = j - i + 1, i
+    s = geometry.cumulative_length(poly, closed=True)
+    target = ((best_start + best_len // 2) % n) * s[-1] / n
+    return int(min(np.searchsorted(s, target), len(poly) - 1))
+
+
 def _side(a: np.ndarray, b: np.ndarray) -> float:
     """> 0 when polyline ``b`` lies to the left of ``a`` (in a's direction of travel)."""
     pts = geometry.resample(a, count=100)[10:90]
@@ -95,7 +133,7 @@ def build(layout: Layout, fp: FitParams, *, direction: str = "ccw",
         line = layout.curves[0].points
         if closed:
             line = _orient_loop(line, direction)
-            line = _start_at(line, np.argmin(line[:, 1]))
+            line = _start_at(line, straight_middle(line))
         elif line[0].sum() > line[-1].sum():  # segments start at the end nearer the top-left
             line = line[::-1]
         center = fit(line, closed)
@@ -121,7 +159,7 @@ def build(layout: Layout, fp: FitParams, *, direction: str = "ccw",
     a, b = (c.points for c in layout.curves)
     if closed:
         outer, inner = _orient_loop(a, direction), _orient_loop(b, direction)
-        outer = _start_at(outer, np.argmin(outer[:, 1]))
+        outer = _start_at(outer, straight_middle(outer))
         inner = _start_at(inner, np.argmin(np.linalg.norm(inner - outer[0], axis=1)))
         edges = {"outer": fit(outer, True), "inner": fit(inner, True)}
     else:

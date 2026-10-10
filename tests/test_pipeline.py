@@ -9,6 +9,7 @@ import pytest
 
 from drawcircuit import Params, TrackError, export, geometry, process, synth
 from drawcircuit.cli import main
+from drawcircuit.track import straight_middle
 
 from test_bspline import de_boor
 
@@ -68,7 +69,7 @@ def test_orientation_conventions():
     assert geometry.signed_area(outer.sample(500)) < 0  # counter-clockwise on the page (y down)
     assert geometry.signed_area(inner.sample(500)) < 0
     assert abs(geometry.signed_area(outer.sample(500))) > abs(geometry.signed_area(inner.sample(500)))
-    # both edges start side by side, at the top of the outer edge
+    # both edges start side by side
     assert np.linalg.norm(outer(0.0) - inner(0.0)) < 1.5 * result.track.width["max"]
     cw = process(synth.make(kind="circuit", source="edges", seed=1).image, Params(direction="cw"))
     assert geometry.signed_area(cw.track.edges["outer"].sample(500)) > 0
@@ -147,3 +148,21 @@ def test_real_examples(name, kind, width):
     for s in t.edges.values():
         assert s.rms_error < 1.5
     assert (t.reference is not None) == (kind == "circuit")
+
+
+def test_start_halfway_along_the_longest_straight():
+    # a "D": an 800 px straight from (300, 1000) up to (300, 200), closed by a half circle
+    straight = np.column_stack([np.full(800, 300.0), np.linspace(1000, 200, 800, endpoint=False)])
+    th = np.linspace(-np.pi / 2, np.pi / 2, 1257, endpoint=False)
+    arc = np.column_stack([300 + 400 * np.cos(th), 600 + 400 * np.sin(th)])
+    loop = np.roll(np.vstack([straight, arc]), 700, axis=0)
+    assert np.linalg.norm(loop[straight_middle(loop)] - [300, 600]) < 5.0  # 2 px sampling
+
+
+@pytest.mark.parametrize("name", ["complex_circuit.png", "street_circuit.png", "hairpin_circuit.png"])
+def test_circuits_start_on_a_straight(name):
+    ref = process(EXAMPLES / name, Params()).track.reference
+    near = (ref.s < 100) | (ref.s > ref.s[-1] - 100)
+    d1, d2 = ref.line(ref.u[near], 1), ref.line(ref.u[near], 2)
+    curvature = np.abs(np.sum(d2 * geometry.left_normals(d1), axis=1)) / np.sum(d1 * d1, axis=1)
+    assert 1.0 / curvature.max() > 2000.0

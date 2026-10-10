@@ -37,10 +37,10 @@ The CLI prints what it found:
 
 ```
 circuit: two drawn edges -> edges outer, inner
-  outer   223 control points, length  8048.7 px, fit error max 3.21 px
-  inner   223 control points, length  7938.0 px, fit error max 2.85 px
+  outer   223 control points, length  8048.7 px, fit error max 3.53 px
+  inner   223 control points, length  7938.1 px, fit error max 2.92 px
   track width ~17 px (min 15, max 19)
-  reference line 7990.5 px, min radius 18.3 px, 1 - w*kappa >= 0.55, within 0.5 px of the midline
+  reference line 7990.5 px, min radius 18.4 px, 1 - w*kappa >= 0.54, within 0.5 px of the midline
 ```
 
 From Python:
@@ -94,12 +94,12 @@ ref.s, ref.u, ref.w_left, ref.w_right   # one row every 2 px of arc length
   "reference": {                // circuits only, else null
     "line": {...},              // closed spline, same fields as an edge
     "smoothing_sigma_px": 7.68, // Gaussian smoothing applied to the true midline
-    "max_midline_deviation_px": 2.39,
-    "min_radius_px": 15.3,
-    "min_1_minus_w_kappa": 0.3678, // min over the lap of 1 - w_inside * |curvature|
-    "spacing_px": 1.999817,   // lap length / number of rows, about 2 px
+    "max_midline_deviation_px": 2.461,
+    "min_radius_px": 16.07,
+    "min_1_minus_w_kappa": 0.373, // min over the lap of 1 - w_inside * |curvature|
+    "spacing_px": 1.999885,   // lap length / number of rows, about 2 px
     "columns": ["s_px", "u", "w_left", "w_right"],
-    "rows": [[0.0, 0.0, 10.15, 10.282], [2.0, 0.0004195, 10.185, 10.287], ...]
+    "rows": [[0.0, 0.0, 10.144, 10.137], [2.0, 0.0004175, 10.144, 10.137], ...]
   },
   "warnings": []
 }
@@ -141,7 +141,10 @@ circuits pass `extrapolate="periodic"`.
 - Circuits run counter-clockwise on the page by default (`--direction cw` to flip).
   Seen in the direction of travel, the inner edge is then on the left.
   `left_edge` and `right_edge` name the edges on each side.
-- Both circuit edges start side by side, at the top-most point of the outer edge.
+- Circuits start halfway along their longest straight, with both edges side by
+  side. A straight is the longest stretch that turns by less than 10° (measured
+  over ~15 px, so hand jitter does not count). A track without straights starts
+  on its least curved stretch.
 - Segments start at the end nearer the top-left of the page. `left` and `right`
   are relative to that direction of travel.
 - Coordinates are pixels of the working frame: the straightened sheet (or the
