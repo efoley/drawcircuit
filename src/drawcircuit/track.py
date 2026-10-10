@@ -7,9 +7,10 @@ from dataclasses import dataclass, field
 import numpy as np
 from scipy.spatial import cKDTree
 
-from . import bspline, geometry
+from . import bspline, geometry, reference
 from .bspline import Spline
 from .layout import CENTERLINE, CIRCUIT, Layout
+from .reference import Reference
 
 
 @dataclass
@@ -28,6 +29,18 @@ class Track:
     direction: str | None = None    # circuits: "ccw" or "cw" as seen on the page
     width: dict[str, float] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
+    reference: Reference | None = None  # circuits: smooth line between the edges, with widths
+
+    @property
+    def left_edge(self) -> str:
+        """Name of the edge on the left in the direction of travel."""
+        if self.kind != CIRCUIT:
+            return "left"
+        return "inner" if self.direction == "ccw" else "outer"
+
+    @property
+    def right_edge(self) -> str:
+        return {"left": "right", "inner": "outer", "outer": "inner"}[self.left_edge]
 
 
 def _orient_loop(poly: np.ndarray, direction: str) -> np.ndarray:
@@ -55,6 +68,20 @@ def _width_stats(a: Spline, b: Spline) -> dict[str, float]:
         pa = pa[60:-60]
     d = geometry.nearest_distances(pa, pb, dst_closed=b.periodic)
     return {"median": float(np.median(d)), "min": float(d.min()), "max": float(d.max())}
+
+
+def _add_reference(track: Track, fp: FitParams) -> Track:
+    if track.kind != CIRCUIT:
+        return track
+    ref = reference.build(track.edges[track.left_edge], track.edges[track.right_edge],
+                          cp_spacing=fp.cp_spacing, smooth=fp.smooth)
+    if ref is None:
+        track.warnings.append("could not trace a reference line between the edges")
+    elif ref.min_factor < reference.MIN_FACTOR:
+        track.warnings.append(f"the reference line only reaches 1 - w*kappa = {ref.min_factor:.2f} "
+                              f"(target {reference.MIN_FACTOR})")
+    track.reference = ref
+    return track
 
 
 def build(layout: Layout, fp: FitParams, *, direction: str = "ccw",
@@ -88,8 +115,8 @@ def build(layout: Layout, fp: FitParams, *, direction: str = "ccw",
         else:
             edges = {"left": fit(left, False), "right": fit(right, False)}
         width = {"median": track_width, "min": track_width, "max": track_width}
-        return Track(layout.kind, CENTERLINE, edges, center, direction if closed else None,
-                     width, warnings)
+        return _add_reference(Track(layout.kind, CENTERLINE, edges, center,
+                                    direction if closed else None, width, warnings), fp)
 
     a, b = (c.points for c in layout.curves)
     if closed:
@@ -107,5 +134,5 @@ def build(layout: Layout, fp: FitParams, *, direction: str = "ccw",
         left, right = (b, a) if _side(a, b) > 0 else (a, b)
         edges = {"left": fit(left, False), "right": fit(right, False)}
     first, second = edges.values()
-    return Track(layout.kind, layout.source, edges, None, direction if closed else None,
-                 _width_stats(first, second), warnings)
+    return _add_reference(Track(layout.kind, layout.source, edges, None, direction if closed else None,
+                                _width_stats(first, second), warnings), fp)

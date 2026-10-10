@@ -6,6 +6,7 @@ import numpy as np
 
 from .bspline import Spline
 from .pipeline import Result
+from .reference import Reference
 
 FORMAT_VERSION = 1
 
@@ -27,6 +28,20 @@ def spline_to_dict(s: Spline, samples: int) -> dict:
     }
 
 
+def reference_to_dict(r: Reference, samples: int) -> dict:
+    rows = np.column_stack([np.round(r.s, 3), np.round(r.u, 7), np.round(r.w_left, 3), np.round(r.w_right, 3)])
+    return {
+        "line": spline_to_dict(r.line, samples),
+        "smoothing_sigma_px": round(r.sigma, 2),
+        "max_midline_deviation_px": round(r.max_deviation, 3),
+        "min_radius_px": round(r.min_radius, 2),
+        "min_1_minus_w_kappa": round(r.min_factor, 4),
+        "spacing_px": round(float(r.s[1] - r.s[0]), 6),
+        "columns": ["s_px", "u", "w_left", "w_right"],
+        "rows": rows.tolist(),
+    }
+
+
 def result_to_dict(result: Result, samples: int = 256) -> dict:
     t = result.track
     w, h = result.frame_size
@@ -36,6 +51,8 @@ def result_to_dict(result: Result, samples: int = 256) -> dict:
         "type": t.kind,
         "source": t.source,
         "direction": t.direction,
+        "left_edge": t.left_edge,
+        "right_edge": t.right_edge,
         "frame": {
             "width": w,
             "height": h,
@@ -47,5 +64,6 @@ def result_to_dict(result: Result, samples: int = 256) -> dict:
         "track_width_px": {k: round(v, 2) for k, v in t.width.items()},
         "edges": {name: spline_to_dict(s, samples) for name, s in t.edges.items()},
         "centerline": spline_to_dict(t.centerline, samples) if t.centerline is not None else None,
+        "reference": reference_to_dict(t.reference, samples) if t.reference is not None else None,
         "warnings": t.warnings,
     }

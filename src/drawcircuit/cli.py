@@ -77,6 +77,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  {name:6s} {len(s.unique_control_points):4d} control points, length {s.length():7.1f} px, "
               f"fit error max {s.max_error:.2f} px")
     print(f"  track width ~{t.width['median']:.0f} px (min {t.width['min']:.0f}, max {t.width['max']:.0f})")
+    if t.reference is not None:
+        r = t.reference
+        print(f"  reference line {r.line.length():.1f} px, min radius {r.min_radius:.1f} px, "
+              f"1 - w*kappa >= {r.min_factor:.2f}, within {r.max_deviation:.1f} px of the midline")
     for w in t.warnings:
         print(f"  warning: {w}")
     print(f"wrote {out}")

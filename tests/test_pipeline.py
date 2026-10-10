@@ -100,13 +100,20 @@ def test_json_export_is_self_consistent():
     result = process(synth.make(kind="circuit", source="edges", seed=1).image, Params())
     doc = json.loads(json.dumps(export.result_to_dict(result, samples=64)))
     assert doc["type"] == "circuit" and doc["source"] == "edges" and doc["direction"] == "ccw"
-    for edge in doc["edges"].values():
+    assert (doc["left_edge"], doc["right_edge"]) == ("inner", "outer")
+    ref = doc["reference"]
+    for edge in [*doc["edges"].values(), ref["line"]]:
         t, c, k = edge["knots"], edge["control_points"], edge["degree"]
         assert len(t) == len(c) + k + 1
         a, b = edge["domain"]
         u = np.linspace(a, b, 64, endpoint=not edge["periodic"])
         ours = np.array([de_boor(t, c, k, x) for x in u])
         np.testing.assert_allclose(ours, edge["samples"], atol=0.01)
+    assert ref["columns"] == ["s_px", "u", "w_left", "w_right"]
+    rows = np.array(ref["rows"])
+    np.testing.assert_allclose(np.diff(rows[:, 0]), ref["spacing_px"], atol=0.002)
+    assert abs(len(rows) * ref["spacing_px"] - ref["line"]["length_px"]) < 0.5
+    assert ref["min_1_minus_w_kappa"] >= 0.3
 
 
 def test_cli_writes_outputs(tmp_path):
@@ -137,3 +144,4 @@ def test_real_examples(name, kind, width):
     assert abs(t.width["median"] - width) < 0.1 * width
     for s in t.edges.values():
         assert s.rms_error < 1.5
+    assert (t.reference is not None) == (kind == "circuit")

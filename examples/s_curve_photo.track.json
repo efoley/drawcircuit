@@ -4,6 +4,8 @@
  "type": "segment",
  "source": "edges",
  "direction": null,
+ "left_edge": "left",
+ "right_edge": "right",
  "frame": {
   "width": 1206,
   "height": 1600,
@@ -2510,5 +2512,6 @@
   }
  },
  "centerline": null,
+ "reference": null,
  "warnings": []
 }

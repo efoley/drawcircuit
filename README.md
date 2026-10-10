@@ -11,6 +11,9 @@ two track edges.
   - **one line drawn** (the centerline): fits it and offsets it by a road width
 - Writes cubic B-splines (knots plus control points) as JSON, plus an overlay
   PNG for checking the result.
+- For circuits, also writes a smooth **reference line** with the road width to
+  either side measured along its normal: the input a racing-line optimiser
+  works from (x, y, w_left, w_right).
 
 ![circuit example](examples/complex_circuit.overlay.png)
 ![street circuit example](examples/street_circuit.overlay.png)
@@ -37,6 +40,7 @@ circuit: two drawn edges -> edges outer, inner
   outer   223 control points, length  8048.7 px, fit error max 3.21 px
   inner   223 control points, length  7938.0 px, fit error max 2.85 px
   track width ~17 px (min 15, max 19)
+  reference line 7990.5 px, min radius 18.3 px, 1 - w*kappa >= 0.55, within 0.5 px of the midline
 ```
 
 From Python:
@@ -52,6 +56,10 @@ outer = track.edges["outer"]       # circuits: "outer"/"inner", segments: "left"
 outer.sample(500)                  # (500, 2) points
 outer(0.25), outer(0.25, nu=1)     # position and derivative at a parameter value
 outer.knots, outer.control_points, outer.degree
+track.left_edge, track.right_edge  # e.g. "inner", "outer": which edge is on the left in the direction of travel
+ref = track.reference              # circuits only, else None
+ref.line                           # the reference line, a Spline
+ref.s, ref.u, ref.w_left, ref.w_right   # one row every 2 px of arc length
 ```
 
 ## Output format (`*.track.json`)
@@ -61,6 +69,8 @@ outer.knots, outer.control_points, outer.degree
   "type": "circuit",            // or "segment"
   "source": "edges",            // "edges": two edges drawn; "centerline": one line drawn and offset
   "direction": "ccw",           // circuits only: travel direction as seen on the page
+  "left_edge": "inner",         // the edge on the left in the direction of travel
+  "right_edge": "outer",
   "frame": {                    // coordinate system of every point below
     "width": 1600, "height": 1236, "units": "px", "y_axis": "down",
     "paper_detected": true,     // the sheet was found in the photo and straightened
@@ -81,9 +91,35 @@ outer.knots, outer.control_points, outer.degree
     "inner": {...}
   },
   "centerline": null,           // the fitted centerline when source == "centerline"
+  "reference": {                // circuits only, else null
+    "line": {...},              // closed spline, same fields as an edge
+    "smoothing_sigma_px": 7.68, // Gaussian smoothing applied to the true midline
+    "max_midline_deviation_px": 2.39,
+    "min_radius_px": 15.3,
+    "min_1_minus_w_kappa": 0.3678, // min over the lap of 1 - w_inside * |curvature|
+    "spacing_px": 1.999817,   // lap length / number of rows, about 2 px
+    "columns": ["s_px", "u", "w_left", "w_right"],
+    "rows": [[0.0, 0.0, 10.15, 10.282], [2.0, 0.0004195, 10.185, 10.287], ...]
+  },
   "warnings": []
 }
 ```
+
+**The reference line.** Racing-line optimisers describe the road as a smooth
+reference line plus the width to either side of it. `reference.line` is a
+closed spline between the edges that starts beside their start and runs in
+the direction of travel. Each row gives the arc length `s_px` along the line, its
+parameter `u`, and the distances `w_left`, `w_right` (both positive) from the
+point `line(u)` to the `left_edge` and `right_edge`, measured along the line's
+normal. So `line(u) + w_left * n` lies on the left edge and `line(u) - w_right * n`
+on the right edge, where `n` is the unit normal pointing to the left.
+
+The line is the true midline (the points equally far from both edges),
+smoothed just enough that `1 - w_inside * |curvature| >= 0.3` everywhere, where
+`w_inside` is the width on the side the line turns towards. Where that factor
+reaches 0, the normals of neighbouring points cross inside the road. Sharp
+corners need the smoothing: it widens them and moves the line towards their
+inside. The edges are left exactly as drawn.
 
 **Evaluating the splines.** Each spline is a standard B-spline: any de Boor
 evaluator gives the curve for u in `domain`, which is [0, 1]. The parameter is
@@ -104,6 +140,7 @@ circuits pass `extrapolate="periodic"`.
 
 - Circuits run counter-clockwise on the page by default (`--direction cw` to flip).
   Seen in the direction of travel, the inner edge is then on the left.
+  `left_edge` and `right_edge` name the edges on each side.
 - Both circuit edges start side by side, at the top-most point of the outer edge.
 - Segments start at the end nearer the top-left of the page. `left` and `right`
   are relative to that direction of travel.
@@ -142,6 +179,11 @@ circuits pass `extrapolate="periodic"`.
    line is within `--tol` pixels, so a looser tolerance gives fewer control
    points. For a centerline, the edges are offset by
    `--track-width` along the normal and then fitted.
+7. **Reference line.** For circuits, the true midline is traced as the zero
+   level of (distance to outer edge − distance to inner edge). It is smoothed
+   with a Gaussian of growing width (from 2 px, ×1.4 per step) until the
+   condition above holds, then fitted. The widths are found by casting rays
+   along the line's normals onto the edges.
 
 ## Options
 
@@ -182,6 +224,8 @@ circuits pass `extrapolate="periodic"`.
   taken as one closed line, so it is misread as a centerline circuit. Leave
   the ends of a segment open.
 - A centerline's road width is a single constant (`--track-width`).
+- Only circuits get a reference line. A figure-8 does not get one, since its
+  edges cross.
 - Output is in pixels. Real-world scale is not inferred from the paper size.
 
 ## Development

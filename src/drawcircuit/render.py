@@ -12,6 +12,7 @@ from .pipeline import Result
 EDGE_COLORS = {"outer": (40, 40, 220), "left": (40, 40, 220),
                "inner": (210, 110, 20), "right": (210, 110, 20)}
 CENTER_COLOR = (60, 150, 60)
+REFERENCE_COLOR = (150, 50, 150)
 SHIFT = 4  # sub-pixel drawing precision for cv2
 
 
@@ -39,6 +40,8 @@ def overlay(result: Result, show_control_points: bool = True) -> np.ndarray:
         _poly(img, s.sample(1500), s.periodic, color, 2)
     if t.centerline is not None:
         _poly(img, t.centerline.sample(1500), t.centerline.periodic, CENTER_COLOR, 1)
+    if t.reference is not None:
+        _poly(img, t.reference.line.sample(1500), True, REFERENCE_COLOR, 1)
 
     # Start marker and direction arrow halfway between the edges.
     first, second = t.edges.values()
@@ -51,6 +54,8 @@ def overlay(result: Result, show_control_points: bool = True) -> np.ndarray:
 
     label = f"{t.kind} ({'two edges drawn' if t.source == 'edges' else 'centerline drawn'})"
     legend = [(label, (0, 0, 0))] + [(n, EDGE_COLORS.get(n, (0, 0, 0))) for n in t.edges]
+    if t.reference is not None:
+        legend.append(("reference", REFERENCE_COLOR))
     for i, (text, color) in enumerate(legend):
         y = 32 + 30 * i
         cv2.putText(img, text, (16, y), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 5, cv2.LINE_AA)
