@@ -9,10 +9,12 @@ dependencies = [
     "scipy>=1.11",
     "scikit-image>=0.21",
     "opencv-python-headless>=4.8",
+    "matplotlib>=3.7",
 ]
 
 [project.scripts]
 drawcircuit = "drawcircuit.cli:main"
+drawcircuit-3d = "drawcircuit.render3d:main"
 
 [dependency-groups]
 dev = ["pytest>=8"]

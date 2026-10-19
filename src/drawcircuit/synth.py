@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import cv2
@@ -25,6 +25,7 @@ class Sketch:
     edges: list[np.ndarray]      # ground-truth edge polylines, image px
     centerline: np.ndarray       # ground-truth centerline, image px
     width: float
+    ticks: list[np.ndarray] = field(default_factory=list)  # where tick marks cross the centerline
 
 
 # --------------------------------------------------------------------------- shapes
@@ -177,7 +178,7 @@ def _scribbles(shape, rng, count: int) -> np.ndarray:
 def make(kind: str = "circuit", source: str = "edges", *, seed: int = 0, size=(1600, 1236),
          width: float = 70.0, photo: bool = False, shadows: bool = False, gaps: int = 2,
          retrace: bool = False, scribbles: int = 0, shape: str | None = None,
-         start_line: bool = False, darkness: float = 0.6) -> Sketch:
+         start_line: bool = False, darkness: float = 0.6, ticks: int = 0) -> Sketch:
     rng = np.random.default_rng(seed)
     w, h = size
     closed = kind == "circuit"
@@ -200,6 +201,20 @@ def make(kind: str = "circuit", source: str = "edges", *, seed: int = 0, size=(1
         ext = (b - a) * 0.15
         ink = np.maximum(ink, pencil((h, w), np.array([a - ext, b + ext]), False, rng, gaps=0,
                                      darkness=darkness))
+    marks = []
+    if ticks:  # short marks across the centerline, every third one on one side only
+        line = lines[0] if source == "centerline" else geometry.resample(center, spacing=1.0, closed=closed)
+        normals = geometry.left_normals(gaussian_filter1d(line, 3, axis=0, order=1,
+                                                          mode="wrap" if closed else "nearest"))
+        for k in range(ticks):
+            i = int((k + rng.uniform(0.3, 0.7)) * len(line) / ticks)
+            a = rng.uniform(-0.25, 0.25)
+            d = normals[i] * np.cos(a) + np.array([-normals[i][1], normals[i][0]]) * np.sin(a)
+            reach = rng.uniform(20, 32)
+            ends = [line[i], line[i] + d * reach] if k % 3 == 2 else [line[i] - d * reach, line[i] + d * reach]
+            ink = np.maximum(ink, pencil((h, w), np.array(ends), False, rng, gaps=0, wobble=0.0,
+                                         darkness=darkness))
+            marks.append(line[i])
     if scribbles:
         ink = np.maximum(ink, _scribbles((h, w), rng, scribbles))
     img = compose(ink, rng, shadows=shadows)
@@ -208,7 +223,8 @@ def make(kind: str = "circuit", source: str = "edges", *, seed: int = 0, size=(1
         img, m = on_table(img, rng)
         warp = lambda p: cv2.perspectiveTransform(p[None].astype(np.float64), m)[0]
         edges, center = [warp(e) for e in edges], warp(center)
-    return Sketch(img, kind, source, edges, center, width)
+        marks = [warp(m[None])[0] for m in marks]
+    return Sketch(img, kind, source, edges, center, width, marks)
 
 
 EXAMPLES = {

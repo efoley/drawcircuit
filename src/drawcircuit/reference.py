@@ -42,6 +42,17 @@ class Reference:
     min_radius: float        # px
     max_deviation: float = 0.0  # farthest the line strays from the true midline, px
 
+    @property
+    def length(self) -> float:
+        """Lap length along the line, px: the row spacing times the number of rows."""
+        return float(self.s[1] - self.s[0]) * len(self.s)
+
+    def u_at(self, s) -> np.ndarray:
+        """Line parameter at arc length ``s`` px, wrapping around the lap."""
+        total = self.length
+        return np.interp(np.asarray(s, dtype=float) % total, np.append(self.s, total),
+                         np.append(self.u, self.line.domain[1]))
+
 
 def midline(a: np.ndarray, b: np.ndarray, grid: float = 0.5) -> np.ndarray | None:
     """Points equally far from two nested closed polylines, as a closed polyline.

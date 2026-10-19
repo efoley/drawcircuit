@@ -8,10 +8,12 @@ import sys
 from pathlib import Path
 
 import cv2
+import numpy as np
 
 from . import export, render
 from .layout import TrackError
 from .pipeline import Params, process
+from .track import Track
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -34,6 +36,27 @@ def _parser() -> argparse.ArgumentParser:
     ap.add_argument("--direction", choices=["ccw", "cw"], default="ccw",
                     help="travel direction for circuits, as seen on the page (default: ccw)")
     ap.add_argument("--track-width", type=float, help="road width in frame px for centerline drawings")
+    ap.add_argument("--length-m", type=float,
+                    help="real length in meters of the lap (along the reference line) or of the road; "
+                         "sets the scale")
+    ap.add_argument("--track-width-m", type=float,
+                    help="road width in meters for centerline drawings (needs --length-m)")
+    ap.add_argument("--grades",
+                    help="grade of each section between tick marks, comma-separated in travel order "
+                         "starting after the first tick past the start line, e.g. "
+                         "'1-2%%,5%%,descent,flat' (descent/climb/? get the grade that closes the lap)")
+    ap.add_argument("--section-width-m", action="append", default=[], metavar="K=W",
+                    help="road width W in meters for section K of a centerline circuit, instead of "
+                         "--track-width-m; repeat for more sections")
+    ap.add_argument("--width-taper", type=float, default=5.0,
+                    help="a change of road width is spread over this many times its size (default 5)")
+    ap.add_argument("--move-tick", type=int, metavar="K",
+                    help="move tick K along the lap until the grades close it, instead of solving a "
+                         "descent/climb grade: e.g. '--grades ...,-3%%,flat --move-tick 7' makes a 3%% "
+                         "descent as long as the climb needs")
+    ap.add_argument("--vertical-radius-m", type=float,
+                    help="radius of the vertical curves that ease each grade change, in meters "
+                         "(needs --length-m; default 1000, 0 for abrupt changes)")
     ap.add_argument("--no-paper", action="store_true",
                     help="do not look for and straighten a sheet of paper in the photo")
     ap.add_argument("--working-size", type=int, default=1600,
@@ -48,12 +71,27 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = _parser().parse_args(argv)
+    ap = _parser()
+    args = ap.parse_args(argv)
+    if args.track_width is not None and args.track_width_m is not None:
+        ap.error("give the road width in px (--track-width) or in meters (--track-width-m), not both")
+    for name in ("track_width_m", "vertical_radius_m", "section_width_m"):
+        if getattr(args, name) not in (None, []) and args.length_m is None:
+            ap.error(f"--{name.replace('_', '-')} needs --length-m to set the scale")
+    if args.section_width_m and args.track_width_m is None:
+        ap.error("--section-width-m needs --track-width-m for the other sections")
+    try:
+        section_widths = {int(k): float(v) for k, v in (s.split("=") for s in args.section_width_m)}
+    except ValueError:
+        ap.error("--section-width-m takes SECTION=WIDTH, e.g. 11=20")
     params = Params(
         working_size=args.working_size, find_paper=not args.no_paper, mode=args.mode,
         closed=args.closed, direction=args.direction, track_width=args.track_width,
         ink_threshold=args.ink_threshold, tol=args.tol, cp_spacing=args.cp_spacing,
-        smooth=args.smooth, max_gap=args.max_gap,
+        smooth=args.smooth, max_gap=args.max_gap, length_m=args.length_m,
+        track_width_m=args.track_width_m,
+        grades=args.grades.split(",") if args.grades else None, vertical_radius_m=args.vertical_radius_m,
+        move_tick=args.move_tick, section_widths_m=section_widths or None, width_taper=args.width_taper,
     )
     try:
         result = process(args.image, params)
@@ -81,10 +119,46 @@ def main(argv: list[str] | None = None) -> int:
         r = t.reference
         print(f"  reference line {r.line.length():.1f} px, min radius {r.min_radius:.1f} px, "
               f"1 - w*kappa >= {r.min_factor:.2f}, within {r.max_deviation:.1f} px of the midline")
+    if t.m_per_px is not None:
+        lo, hi = t.width["min"] * t.m_per_px, t.width["max"] * t.m_per_px
+        road = f"{lo:.1f} m" if hi - lo < 0.05 else f"{lo:.1f} to {hi:.1f} m"
+        print(f"  scale {t.m_per_px:.4f} m/px: {t.length() * t.m_per_px:.0f} m long, road {road} wide")
+    if t.profile is not None:
+        _print_profile(t)
     for w in t.warnings:
         print(f"  warning: {w}")
     print(f"wrote {out}")
     return 0
+
+
+def _print_profile(t: Track) -> None:
+    p = t.profile
+    scale, unit = (t.m_per_px, "m") if t.m_per_px is not None else (1.0, "px")
+    n = len(p.ticks)
+    print(f"  {n} tick mark{'s' if n != 1 else ''} -> {len(p.sections)} section"
+          f"{'s' if len(p.sections) != 1 else ''} in travel order"
+          f"{' (section 1 starts at the first tick after the start line)' if n else ''}:")
+    for k in np.nonzero(p.moved)[0]:
+        print(f"  tick {k + 1} moved {p.moved[k] * scale:+.0f} {unit} along the lap from where it is drawn, "
+              "so the grades close the lap")
+    varies = max(sec.width for sec in p.sections) - min(sec.width for sec in p.sections) > 0.02 * t.width["median"]
+    for sec in p.sections:
+        line = f"    {sec.index:2d} {sec.length * scale:7.0f} {unit}"
+        if varies:
+            line += f"  {sec.width * scale:5.1f} {unit} wide"
+        if p.graded:
+            line += f"  {100 * sec.grade:+6.2f}%  {sec.label}{'  (solved to close the lap)' if sec.solved else ''}"
+        print(line)
+    if p.graded and p.vertical_radius > 0 and p.eases.max() > 0:
+        eased = p.eases[p.eases > 0] * scale
+        print(f"  grade changes eased on a {p.vertical_radius * scale:.0f} {unit} vertical radius, "
+              f"over {eased.min():.0f} to {eased.max():.0f} {unit} around each tick")
+    if p.graded:
+        z = p.z * scale
+        print(f"  elevation {z.min():+.1f} to {z.max():+.1f} {unit} relative to the start line, "
+              f"total climb {np.sum(np.clip(np.diff(np.append(z, z[0])), 0, None)):.1f} {unit}")
+    else:
+        print(f"  pass --grades with {len(p.sections)} values in this order for an elevation profile")
 
 
 if __name__ == "__main__":

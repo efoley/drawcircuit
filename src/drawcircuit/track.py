@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -12,7 +13,11 @@ from scipy.spatial import cKDTree
 from . import bspline, geometry, reference
 from .bspline import Spline
 from .layout import CENTERLINE, CIRCUIT, Layout
+from .profile import Profile
 from .reference import Reference
+
+
+OFFSET_TOL = 0.5  # px: how closely the edges of a centerline drawing follow its offsets
 
 
 @dataclass
@@ -32,6 +37,8 @@ class Track:
     width: dict[str, float] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     reference: Reference | None = None  # circuits: smooth line between the edges, with widths
+    profile: Profile | None = None      # circuits drawn as a centerline with tick marks: grades
+    m_per_px: float | None = None       # real-world scale, when the length was given
 
     @property
     def left_edge(self) -> str:
@@ -43,6 +50,15 @@ class Track:
     @property
     def right_edge(self) -> str:
         return {"left": "right", "inner": "outer", "outer": "inner"}[self.left_edge]
+
+    def length(self) -> float:
+        """Length in px that a real-world length refers to: the reference line if
+        there is one, else the centerline, else the mean of the two edges."""
+        if self.reference is not None:
+            return self.reference.length
+        if self.centerline is not None:
+            return self.centerline.length()
+        return float(np.mean([e.length() for e in self.edges.values()]))
 
 
 def _orient_loop(poly: np.ndarray, direction: str) -> np.ndarray:
@@ -123,7 +139,9 @@ def _add_reference(track: Track, fp: FitParams) -> Track:
 
 
 def build(layout: Layout, fp: FitParams, *, direction: str = "ccw",
-          track_width: float = 60.0) -> Track:
+          track_width: float | Callable[[Spline, np.ndarray], np.ndarray] = 60.0) -> Track:
+    """Oriented, aligned track edges. For a centerline drawing ``track_width`` is the
+    road width in px, or a function of (centerline, parameters) giving it along the line."""
     fit = lambda pts, closed: bspline.fit(pts, closed, tol=fp.tol, cp_spacing=fp.cp_spacing,
                                            smooth=fp.smooth)
     warnings = list(layout.warnings)
@@ -142,17 +160,23 @@ def build(layout: Layout, fp: FitParams, *, direction: str = "ccw",
         normal = geometry.left_normals(dp)
         speed = np.linalg.norm(dp, axis=1)
         curvature = np.abs(dp[:, 0] * ddp[:, 1] - dp[:, 1] * ddp[:, 0]) / np.maximum(speed, 1e-9) ** 3
-        if curvature.max() * track_width / 2 > 1.0:
-            warnings.append(f"a corner is tighter than half the track width ({track_width:.0f} px); "
+        w = track_width(center, u) if callable(track_width) else np.full(len(u), float(track_width))
+        if np.max(curvature * w / 2) > 1.0:
+            worst = int(np.argmax(curvature * w))
+            warnings.append(f"a corner is tighter than half the track width ({w[worst]:.0f} px); "
                             "the inside edge will fold over itself there")
-        left, right = p + normal * track_width / 2, p - normal * track_width / 2
+        left, right = p + normal * w[:, None] / 2, p - normal * w[:, None] / 2
+        # The edges are offsets of a line that is already smooth, so they are fitted
+        # closely: the road is then as wide as asked, and width changes keep their length.
+        fit = lambda pts, closed: bspline.fit(pts, closed, tol=min(fp.tol, OFFSET_TOL),
+                                               cp_spacing=fp.cp_spacing, smooth=fp.smooth)
         if closed:
             inner_is_left = abs(geometry.signed_area(left)) < abs(geometry.signed_area(right))
             outer, inner = (right, left) if inner_is_left else (left, right)
             edges = {"outer": fit(outer, True), "inner": fit(inner, True)}
         else:
             edges = {"left": fit(left, False), "right": fit(right, False)}
-        width = {"median": track_width, "min": track_width, "max": track_width}
+        width = {"median": float(np.median(w)), "min": float(w.min()), "max": float(w.max())}
         return _add_reference(Track(layout.kind, CENTERLINE, edges, center,
                                     direction if closed else None, width, warnings), fp)
 

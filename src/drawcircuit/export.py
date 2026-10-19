@@ -7,6 +7,7 @@ import numpy as np
 from .bspline import Spline
 from .pipeline import Result
 from .reference import Reference
+from .track import Track
 
 FORMAT_VERSION = 1
 
@@ -42,6 +43,42 @@ def reference_to_dict(r: Reference, samples: int) -> dict:
     }
 
 
+def profile_to_dict(t: Track) -> dict:
+    p = t.profile
+    rows = []
+    if p.graded:
+        rows = np.column_stack([np.round(t.reference.s, 3), np.round(p.z, 3), np.round(p.grade, 6)]).tolist()
+    return {
+        "vertical_radius_px": round(p.vertical_radius, 3) if p.graded else None,
+        "ticks": [{"s_px": round(float(s), 3), "point": _r(pt),
+                   "ease_px": round(float(p.eases[i]), 3) if p.graded else None,
+                   "moved_px": round(float(p.moved[i]), 3)}
+                  for i, (s, pt) in enumerate(zip(p.ticks, p.points))],
+        "sections": [{
+            "index": sec.index,
+            "label": sec.label,
+            "grade": None if sec.grade is None else round(sec.grade, 6),
+            "solved": sec.solved,
+            "s_start_px": round(sec.s_start, 3),
+            "s_end_px": round(sec.s_end, 3),
+            "length_px": round(sec.length, 3),
+            "width_px": round(sec.width, 3),
+            "z_start_px": round(sec.z_start, 3) if p.graded else None,
+            "z_end_px": round(sec.z_end, 3) if p.graded else None,
+        } for sec in p.sections],
+        "columns": ["s_px", "z_px", "grade"],
+        "rows": rows,
+    }
+
+
+def scale_to_dict(t: Track) -> dict:
+    return {
+        "m_per_px": round(t.m_per_px, 9),
+        "length_m": round(t.length() * t.m_per_px, 3),
+        "track_width_m": round(t.width["median"] * t.m_per_px, 3),
+    }
+
+
 def result_to_dict(result: Result, samples: int = 256) -> dict:
     t = result.track
     w, h = result.frame_size
@@ -65,5 +102,7 @@ def result_to_dict(result: Result, samples: int = 256) -> dict:
         "edges": {name: spline_to_dict(s, samples) for name, s in t.edges.items()},
         "centerline": spline_to_dict(t.centerline, samples) if t.centerline is not None else None,
         "reference": reference_to_dict(t.reference, samples) if t.reference is not None else None,
+        "scale": scale_to_dict(t) if t.m_per_px is not None else None,
+        "profile": profile_to_dict(t) if t.profile is not None else None,
         "warnings": t.warnings,
     }
