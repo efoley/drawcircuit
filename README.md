@@ -36,10 +36,11 @@ circuits with a narrow road (`complex_circuit`, `flowing_circuit`, `street_circu
 `hairpin_circuit`, `s_bend_circuit` and `diagonal_circuit`, the last four with sharp corners).
 `hairpin_circuit` is processed as a 2.3 km lap (`--length-m 2300`, a road about
 10 m wide as drawn), so its corners are rounded to the 6 m limit.
-`climb_circuit`, `switchback_circuit`, `wide_straight_circuit` and
-`tunnel_circuit` are pencil photos of circuits drawn as one line, with ticks
-and the grades written beside them, processed as 4, 5, 2 and 8 km laps with a
-10 m road. `wide_straight_circuit` has a 20 m wide start straight and
+`climb_circuit`, `switchback_circuit`, `wide_straight_circuit`,
+`tunnel_circuit`, `criterium_circuit` and `criterium2_circuit` are pencil photos
+of circuits drawn as one line, with ticks and the grades written beside them,
+processed as 4, 5, 2, 8, 1.8 and 1.5 km laps with a 10 m road. The two criteriums
+have their start line marked on the drawing (`--start`). `wide_straight_circuit` has a 20 m wide start straight and
 street-style climbs that change grade within a few meters. `tunnel_circuit`
 passes under itself through a tunnel and is traced along waypoints
 (`tunnel_circuit.route.json`; see [Grades and scale](#grades-and-scale) and
@@ -56,6 +57,10 @@ uv run drawcircuit examples/wide_straight_circuit.jpg --direction cw --length-m 
 uv run drawcircuit examples/tunnel_circuit.jpg --route examples/tunnel_circuit.route.json --direction cw \
     --length-m 8000 --track-width-m 10 --vertical-radius-m 300 --under 4 --grades \
     "flat,15%,10%,descent,1%,flat,-1%,flat,1%,3%,4%,flat,2%,6%,8%,5%,9%,2%,flat,-3%,-2%,flat,-7%,flat,8%,12%,descent"
+uv run drawcircuit examples/criterium_circuit.jpg --direction ccw --start 440,738 --length-m 1800 \
+    --track-width-m 10 --grades "2%,flat,descent,flat" --vertical-radius-m 3000   # gentle grade changes
+uv run drawcircuit examples/criterium2_circuit.jpg --direction ccw --start 282,659 --length-m 1500 \
+    --track-width-m 10 --grades "1%,descent,flat" --vertical-radius-m 3000
 ```
 
 ## Driven by an LLM
@@ -230,8 +235,9 @@ circuits pass `extrapolate="periodic"`.
 - Circuits run counter-clockwise on the drawing by default (`--direction cw` to flip).
   Seen in the direction of travel, the inner edge is then on the left.
   `left_edge` and `right_edge` name the edges on each side.
-- Circuits start halfway along their longest straight, with both edges side by
-  side. A straight is the longest stretch that turns by less than 10° (measured
+- Circuits start at the start line marked on the drawing (`--start X,Y`, in
+  working-frame px as in the overlay), else halfway along their longest
+  straight, with both edges side by side. A straight is the longest stretch that turns by less than 10° (measured
   over ~15 px, so hand jitter does not count). A track without straights starts
   on its least curved stretch.
 - Segments start at the end nearer the top-left of the page. `left` and `right`
@@ -434,6 +440,7 @@ descent eases to −2.6%.
 | `--min-inside-radius-m M` | 6 | at a real scale, round corners until the inside edge turns no tighter (0 = as drawn) |
 | `--max-corner-turn-deg D` | 200 | report corners that turn through more than this in one go |
 | `--move-tick K` | | move tick K along the lap until the grades, all given, close it |
+| `--start X,Y` | | start/finish line marked on the drawing (working-frame px); default: middle of the longest straight |
 | `--route JSON` | | follow these waypoints along the ink instead of joining strokes |
 | `--under K` | | where the lap crosses itself, section K passes underneath |
 | `--clearance-m M` | 6 | height between the two roads at a crossing |

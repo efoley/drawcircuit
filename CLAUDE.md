@@ -35,7 +35,9 @@ Assume an LLM (you) runs drawcircuit for the user, with the photo in front of it
    `"free"` legs through a tunnel, and check the traced line again.
 3. Read the grades and the direction off the photo. Positive grades climb in
    the direction of travel, so the order the grades are written in gives
-   `--direction`. Rerun with `--grades` in section order.
+   `--direction`, unless an arrow shows it. A start line marked on the drawing
+   goes in as `--start X,Y` (read off `1_page.png` or the overlay). Rerun with
+   `--grades` in section order.
 4. Check the printed sections and the overlay against the photo, and render
    `uv run drawcircuit-3d photo.track.json`. Where the lap crosses itself,
    pass the section that goes underneath with `--under`.

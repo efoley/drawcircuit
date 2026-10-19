@@ -213,6 +213,15 @@ def straight_middle(poly: np.ndarray, max_turn: float = np.radians(10), scale: f
     return int(min(np.searchsorted(s, target), len(poly) - 1))
 
 
+def _start(loop: np.ndarray, start: tuple[float, float] | None) -> np.ndarray:
+    """``loop`` starting where the circuit starts: at the point nearest ``start`` (a start
+    line marked on the drawing, frame px), else halfway along its longest straight."""
+    if start is None:
+        return _start_at(loop, straight_middle(loop))
+    loop = geometry.resample(loop, spacing=1.0, closed=True)  # a bridged pencil gap has no points
+    return _start_at(loop, int(np.argmin(np.linalg.norm(loop - np.asarray(start, dtype=float), axis=1))))
+
+
 def _side(a: np.ndarray, b: np.ndarray) -> float:
     """> 0 when polyline ``b`` lies to the left of ``a`` (in a's direction of travel)."""
     pts = geometry.resample(a, count=100)[10:90]
@@ -250,7 +259,8 @@ def _add_reference(track: Track, fp: FitParams) -> Track:
 
 def build(layout: Layout, fp: FitParams, *, direction: str = "ccw",
           track_width: float | Callable[[Spline, np.ndarray], np.ndarray] = 60.0,
-          inside_radius: float | None = None, max_turn: float = 200.0) -> Track:
+          inside_radius: float | None = None, max_turn: float = 200.0,
+          start: tuple[float, float] | None = None) -> Track:
     """Oriented, aligned track edges. For a centerline drawing ``track_width`` is the
     road width in px, or a function of (centerline, parameters) giving it along the line.
 
@@ -267,7 +277,7 @@ def build(layout: Layout, fp: FitParams, *, direction: str = "ccw",
         line = layout.curves[0].points
         if closed:
             line = _orient_loop(line, direction)
-            line = _start_at(line, straight_middle(line))
+            line = _start(line, start)
         elif line[0].sum() > line[-1].sum():  # segments start at the end nearer the top-left
             line = line[::-1]
         drawn = fit(line, closed)
@@ -278,7 +288,7 @@ def build(layout: Layout, fp: FitParams, *, direction: str = "ccw",
     a, b = (c.points for c in layout.curves)
     if closed:
         outer, inner = _orient_loop(a, direction), _orient_loop(b, direction)
-        outer = _start_at(outer, straight_middle(outer))
+        outer = _start(outer, start)
         inner = _start_at(inner, np.argmin(np.linalg.norm(inner - outer[0], axis=1)))
         edges = {"outer": fit(outer, True), "inner": fit(inner, True)}
         if inside_radius:

@@ -118,9 +118,15 @@ def render(doc: dict, *, name: str | None = None, exaggeration: float | None = N
             ax.plot([left[0][0]] * 2, [left[0][1]] * 2, [z[0], z[0] + pole], color="black", lw=1.5, zorder=11)
             ax.text(left[0][0], left[0][1], z[0] + pole, " start / finish", fontsize=9, fontweight="bold",
                     ha="left", va="bottom", zorder=12)
-            ahead = center[0] + 0.06 * float(np.max(b - a)) * (center[1] - center[0]) / np.linalg.norm(center[1] - center[0])
-            ax.quiver(center[0][0], center[0][1], z[0], *(ahead - center[0]), 0.0, color="black", lw=1.5,
-                      arrow_length_ratio=0.35, zorder=12)
+            # An arrow along the road, drawn flat (a 3D quiver tilts its head into the exaggerated height).
+            ahead = (center[1] - center[0]) / np.linalg.norm(center[1] - center[0])
+            side = np.array([-ahead[1], ahead[0]])
+            size = 0.06 * float(np.max(b - a))
+            tip = center[0] + size * ahead
+            for piece in ([center[0], tip], [tip - 0.35 * size * (ahead - 0.6 * side), tip],
+                          [tip - 0.35 * size * (ahead + 0.6 * side), tip]):
+                piece = np.array(piece)
+                ax.plot(piece[:, 0], piece[:, 1], [z[0]] * 2, color="black", lw=1.8, zorder=12)
         for sec in (prof or {}).get("sections", []):
             inside = idx[(s[idx] - sec["s_start_m"]) % lap < sec["length_m"]]
             if len(inside) == 0:

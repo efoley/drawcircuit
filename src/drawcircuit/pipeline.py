@@ -50,6 +50,7 @@ class Params:
     min_inside_radius_m: float = 6.0    # round centerline corners so the inside edge is no tighter; 0: as drawn
     max_corner_turn_deg: float = 200.0  # report corners that turn through more (spirals)
     assumed_width_m: float = 10.0       # without length_m, the road is taken to be this wide
+    start: tuple[float, float] | None = None  # start/finish line marked on the drawing (frame px)
 
     def px(self, value: float | None, default: float) -> float:
         return float(value) if value is not None else default * self.working_size / REFERENCE_SIZE
@@ -193,7 +194,7 @@ def _scaled_build(lay: layout_mod.Layout, fit: FitParams, p: Params, diag: float
     def build(m_per_px: float | None) -> Track:
         inside = p.min_inside_radius_m / m_per_px if rounds else None
         return track.build(lay, fit, direction=p.direction, track_width=width(m_per_px),
-                           inside_radius=inside, max_turn=p.max_corner_turn_deg)
+                           inside_radius=inside, max_turn=p.max_corner_turn_deg, start=p.start)
 
     t = build(m)
     if p.length_m is None:  # no real length: take the road to be the usual width

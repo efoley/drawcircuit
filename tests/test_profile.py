@@ -412,3 +412,28 @@ def test_hairpin_example_at_a_real_scale():
     assert t.source == "edges" and len(t.rounded) > 5
     assert inside_edge_radius(t.reference).min() * t.m_per_px > 0.95 * 6
     assert 9 < t.width["median"] * t.m_per_px < 12
+
+
+def test_criterium_example_starts_where_marked():
+    """A 1.8 km criterium whose start line and direction are marked on the drawing."""
+    t = process(EXAMPLES / "criterium_circuit.jpg",
+                Params(direction="ccw", start=(440, 738), length_m=1800, track_width_m=10,
+                       grades=["2%", "flat", "descent", "flat"], vertical_radius_m=3000)).track
+    ref, prof, m = t.reference, t.profile, t.m_per_px
+    assert np.linalg.norm(ref.line(0.0) - [440, 738]) < 4
+    assert ref.line(ref.u[5])[1] > ref.line(0.0)[1]  # heading down the page, as the arrow shows
+    assert [round(100 * sec.grade, 2) for sec in prof.sections][:2] == [2.0, 0.0]
+    assert prof.sections[2].solved and -1.5 < 100 * prof.sections[2].grade < -0.8
+    assert t.reference.length * m == pytest.approx(1800)
+    assert prof.eases[0] * m == pytest.approx(3000 * 0.02)  # 2% eased in over 60 m
+
+
+
+def test_second_criterium_example():
+    t = process(EXAMPLES / "criterium2_circuit.jpg",
+                Params(direction="ccw", start=(282, 659), length_m=1500, track_width_m=10,
+                       grades=["1%", "descent", "flat"], vertical_radius_m=3000)).track
+    prof = t.profile
+    assert np.linalg.norm(t.reference.line(0.0) - [282, 659]) < 4
+    assert len(prof.ticks) == 3 and prof.sections[1].solved and prof.sections[1].grade < 0
+    assert t.reference.length * t.m_per_px == pytest.approx(1500)

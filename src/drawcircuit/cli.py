@@ -16,6 +16,11 @@ from .pipeline import Params, process
 from .track import Track
 
 
+def _point(text: str) -> tuple[float, float]:
+    x, y = (float(v) for v in text.split(","))
+    return x, y
+
+
 def _parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         prog="drawcircuit",
@@ -45,6 +50,9 @@ def _parser() -> argparse.ArgumentParser:
                     help="grade of each section between tick marks, comma-separated in travel order "
                          "starting after the first tick past the start line, e.g. "
                          "'1-2%%,5%%,descent,flat' (descent/climb/? get the grade that closes the lap)")
+    ap.add_argument("--start", type=_point, metavar="X,Y",
+                    help="start/finish line marked on the drawing, in working-frame px as in the overlay "
+                         "(default: halfway along the longest straight)")
     ap.add_argument("--route", type=Path, metavar="JSON",
                     help="follow these waypoints (working-frame px, in travel order) along the ink instead "
                          "of joining strokes automatically: {\"closed\": true, \"points\": [[x, y], "
@@ -107,7 +115,7 @@ def main(argv: list[str] | None = None) -> int:
         grades=args.grades.split(",") if args.grades else None, vertical_radius_m=args.vertical_radius_m,
         move_tick=args.move_tick, section_widths_m=section_widths or None, width_taper=args.width_taper,
         route=route.load(args.route) if args.route else None, under=args.under,
-        clearance_m=args.clearance_m, min_inside_radius_m=args.min_inside_radius_m,
+        clearance_m=args.clearance_m, min_inside_radius_m=args.min_inside_radius_m, start=args.start,
         max_corner_turn_deg=args.max_corner_turn_deg,
     )
     try:
