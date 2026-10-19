@@ -10,7 +10,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from . import export, render
+from . import export, profile, render, route
 from .layout import TrackError
 from .pipeline import Params, process
 from .track import Track
@@ -45,6 +45,10 @@ def _parser() -> argparse.ArgumentParser:
                     help="grade of each section between tick marks, comma-separated in travel order "
                          "starting after the first tick past the start line, e.g. "
                          "'1-2%%,5%%,descent,flat' (descent/climb/? get the grade that closes the lap)")
+    ap.add_argument("--route", type=Path, metavar="JSON",
+                    help="follow these waypoints (working-frame px, in travel order) along the ink instead "
+                         "of joining strokes automatically: {\"closed\": true, \"points\": [[x, y], "
+                         "[x, y, \"free\"], ...]}; a free leg is drawn straight, e.g. through a tunnel")
     ap.add_argument("--section-width-m", action="append", default=[], metavar="K=W",
                     help="road width W in meters for section K of a centerline circuit, instead of "
                          "--track-width-m; repeat for more sections")
@@ -54,6 +58,11 @@ def _parser() -> argparse.ArgumentParser:
                     help="move tick K along the lap until the grades close it, instead of solving a "
                          "descent/climb grade: e.g. '--grades ...,-3%%,flat --move-tick 7' makes a 3%% "
                          "descent as long as the climb needs")
+    ap.add_argument("--under", type=int, metavar="K",
+                    help="where the lap crosses itself, section K passes underneath (a tunnel or "
+                         "underpass): the open grades change so it is --clearance-m below the other road")
+    ap.add_argument("--clearance-m", type=float, default=6.0,
+                    help="height between the two roads where the lap crosses itself (default 6)")
     ap.add_argument("--vertical-radius-m", type=float,
                     help="radius of the vertical curves that ease each grade change, in meters "
                          "(needs --length-m; default 1000, 0 for abrupt changes)")
@@ -92,6 +101,8 @@ def main(argv: list[str] | None = None) -> int:
         track_width_m=args.track_width_m,
         grades=args.grades.split(",") if args.grades else None, vertical_radius_m=args.vertical_radius_m,
         move_tick=args.move_tick, section_widths_m=section_widths or None, width_taper=args.width_taper,
+        route=route.load(args.route) if args.route else None, under=args.under,
+        clearance_m=args.clearance_m,
     )
     try:
         result = process(args.image, params)
@@ -153,6 +164,11 @@ def _print_profile(t: Track) -> None:
         eased = p.eases[p.eases > 0] * scale
         print(f"  grade changes eased on a {p.vertical_radius * scale:.0f} {unit} vertical radius, "
               f"over {eased.min():.0f} to {eased.max():.0f} {unit} around each tick")
+    for c in p.crossings if p.graded else []:
+        total = t.reference.length
+        over, below = (profile.section_at(p.sections, s, total).index for s in (c.s_over, c.s_under))
+        print(f"  crossing at ({c.point[0]:.0f}, {c.point[1]:.0f}): section {over} passes "
+              f"{c.clearance * scale:.1f} {unit} over section {below}")
     if p.graded:
         z = p.z * scale
         print(f"  elevation {z.min():+.1f} to {z.max():+.1f} {unit} relative to the start line, "

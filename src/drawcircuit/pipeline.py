@@ -12,7 +12,8 @@ from skimage.morphology import skeletonize
 
 from . import geometry, preprocess, profile, skeleton, strokes, ticks, track
 from . import layout as layout_mod
-from .layout import CENTERLINE, TrackError
+from . import route as route_mod
+from .layout import CENTERLINE, CIRCUIT, SEGMENT, Layout, TrackError
 from .track import FitParams, Track
 
 REFERENCE_SIZE = 1600  # pixel defaults below are tuned for this working resolution
@@ -43,6 +44,9 @@ class Params:
     move_tick: int | None = None        # move this tick (1-based) along the lap until the grades close it
     section_widths_m: dict[int, float] | None = None  # road width of some sections (centerline circuits)
     width_taper: float = 5.0            # a width change is spread over this many times its size
+    route: route_mod.Route | None = None  # follow these waypoints instead of joining strokes
+    under: int | None = None            # section that passes under where the lap crosses itself
+    clearance_m: float = 6.0            # how far above it the other road must be (needs length_m)
 
     def px(self, value: float | None, default: float) -> float:
         return float(value) if value is not None else default * self.working_size / REFERENCE_SIZE
@@ -90,6 +94,14 @@ def process(image: np.ndarray | str | Path, params: Params | None = None) -> Res
                             stub_length=p.px(None, 60))
     debug.update(skeleton=skel, paths=paths)
 
+    if p.route is not None:  # the line is given as waypoints: follow them along the ink
+        line, free, warnings = route_mod.trace(p.route, skel, ink.mask,
+                                               snap=max(p.px(None, 15), 2 * stroke_width))
+        stroke = strokes.Stroke(line, p.route.closed)
+        lay = Layout(CIRCUIT if p.route.closed else SEGMENT, CENTERLINE, [stroke], [stroke], warnings)
+        debug.update(strokes=[stroke], layout=lay, route=p.route)
+        return _finish(p, lay, ink, stroke_width, diag, (w, h), page, debug, free)
+
     pieces, piece_closed, corners = strokes.split_corners(
         [q.points for q in paths], [q.closed for q in paths], window=max(p.px(None, 10), 2.0 * stroke_width))
     joined = strokes.join(
@@ -109,10 +121,18 @@ def process(image: np.ndarray | str | Path, params: Params | None = None) -> Res
     lay = layout_mod.classify(joined, mode=p.mode, stroke_width=stroke_width,
                               min_length=0.05 * diag)
     debug["layout"] = lay
+    return _finish(p, lay, ink, stroke_width, diag, (w, h), page, debug)
+
+
+def _finish(p: Params, lay: Layout, ink: preprocess.Ink, stroke_width: float, diag: float,
+            frame_size: tuple[int, int], page: preprocess.Page, debug: dict,
+            ignore: np.ndarray | None = None) -> Result:
+    """Fit the track to the chosen line(s), with ticks, scale and grades."""
     marks = []
     if lay.source == CENTERLINE:
         line = lay.curves[0]
-        marks = ticks.find(ink.mask, line.points, line.closed, stroke_width, max_reach=p.px(None, 100))
+        marks = ticks.find(ink.mask, line.points, line.closed, stroke_width, max_reach=p.px(None, 100),
+                           ignore=ignore)
     debug.update(stroke_width=stroke_width, ticks=marks)
 
     fit = FitParams(tol=p.px(p.tol, 2.5), cp_spacing=p.px(p.cp_spacing, 60), smooth=p.smooth)
@@ -123,13 +143,16 @@ def process(image: np.ndarray | str | Path, params: Params | None = None) -> Res
                       else profile.VERTICAL_RADIUS_M) / t.m_per_px
         else:  # no scale: a quarter of the lap, which is 1000 m on a 4 km lap
             radius = 0.25 * t.length()
+        if p.under is not None and t.m_per_px is None:
+            raise ValueError("passing under another road needs the real length too, for the clearance")
         t.profile = profile.build(t.reference, t.centerline, [m.point for m in marks], p.grades,
-                                  t.warnings, vertical_radius=radius, move_tick=p.move_tick)
+                                  t.warnings, vertical_radius=radius, move_tick=p.move_tick, under=p.under,
+                                  clearance=p.clearance_m / t.m_per_px if t.m_per_px else 0.0)
     elif p.grades is not None:
         raise TrackError("grades need a circuit with a reference line")
     elif marks:
         t.warnings.append(f"ignored {len(marks)} tick mark(s): grades need a circuit with a reference line")
-    return Result(t, (w, h), page.homography, page.paper_detected, debug)
+    return Result(t, frame_size, page.homography, page.paper_detected, debug)
 
 
 def _scaled_build(lay: layout_mod.Layout, fit: FitParams, p: Params, diag: float,

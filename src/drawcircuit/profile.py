@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 from scipy.spatial import cKDTree
@@ -49,6 +49,15 @@ class Section:
 
 
 @dataclass
+class Crossing:
+    """Where the lap passes over itself, as on a bridge over a tunnel."""
+    s_over: float        # s along the reference line of the upper road, px
+    s_under: float       # s of the lower road, where the two are closest in height
+    point: np.ndarray    # where they cross, frame px
+    clearance: float     # how far the upper road is above the lower one there, px
+
+
+@dataclass
 class Profile:
     ticks: np.ndarray            # s along the reference line where each tick crosses it, increasing
     points: np.ndarray           # the tick positions on the reference line, frame px
@@ -58,6 +67,7 @@ class Profile:
     eases: np.ndarray | None = None  # length of the vertical curve centred on each tick, px
     moved: np.ndarray | None = None  # how far each tick was moved along the lap from where it was drawn, px
     vertical_radius: float = 0.0     # radius those curves aim for, px; 0 for abrupt changes
+    crossings: list[Crossing] = field(default_factory=list)
 
     @property
     def graded(self) -> bool:
@@ -174,11 +184,14 @@ def _closing_shift(s: np.ndarray, sections: list[Section], grades: list[float | 
 
 def build(ref: Reference, centerline: Spline | None, tick_points: list[np.ndarray],
           grades: list[str] | None, warnings: list[str], vertical_radius: float = 0.0,
-          move_tick: int | None = None) -> Profile:
+          move_tick: int | None = None, under: int | None = None, clearance: float = 0.0) -> Profile:
     """Sections between the ticks, and with ``grades`` the elevation along the lap.
 
     ``move_tick`` (1-based) moves that tick along the lap until the grades, all
-    given, close it: e.g. the end of a descent with a set average grade.
+    given, close it: e.g. the end of a descent with a set average grade. Where
+    the lap crosses itself, section ``under`` passes at least ``clearance`` px
+    below the other road: the open grades (descent, climb, ?) are changed as
+    little as possible to make the room.
     """
     total = ref.length
     s = np.sort(_locate(ref, centerline, np.asarray(tick_points, float).reshape(-1, 2)))
@@ -213,36 +226,69 @@ def build(ref: Reference, centerline: Spline | None, tick_points: list[np.ndarra
         sec.grade, sign = parse_grade(text)
         signs.append(sign)
     rise = sum(sec.grade * sec.length for sec in sections if sec.grade is not None)
-    open_ = [sec for sec in sections if sec.grade is None]
+    open_ = [k for k, sec in enumerate(sections) if sec.grade is None]
     if open_:
-        g = -rise / sum(sec.length for sec in open_)
-        for sec, sign in zip(sections, signs):
-            if sec.grade is None:
-                sec.grade, sec.solved = g, True
-                if sign * g < 0:
-                    warnings.append(f"section {sec.index} is marked {sec.label!r}, but the lap only "
-                                    f"closes with a grade of {100 * g:+.2f}% there")
+        g = -rise / sum(sections[k].length for k in open_)
+        for k in open_:
+            sections[k].grade, sections[k].solved = g, True
     elif abs(rise) > 1e-4 * total:
         warnings.append(f"the grades do not close the lap: it finishes {rise:+.1f} px "
                         f"({100 * rise / total:+.2f}% of the lap length) above the start")
 
-    # Straight grades from tick to tick, with z = 0 at the start line (inside the last section) ...
-    n = len(s)
-    breaks = np.concatenate([[0.0], s, [total]])
-    slopes = np.array([sections[-1].grade] + [sec.grade for sec in sections[:n]])
-    knots = np.concatenate([[0.0], np.cumsum(np.diff(breaks) * slopes)])
-    # ... eased by a vertical curve around each tick, at most half as long as the
-    # sections on either side so that neighbouring curves do not overlap.
-    change = np.array([sections[k].grade - sections[k - 1].grade for k in range(n)])
-    want = vertical_radius * np.abs(change) / 2
-    half = np.minimum(want, [min(sections[k - 1].length, sections[k].length) / 2 for k in range(n)])
+    pairs = overlap_pairs(ref)
+    if under is not None:
+        _make_room(ref, s, sections, open_, pairs, under, clearance, vertical_radius, warnings)
+    for k in open_:
+        if signs[k] * sections[k].grade < 0:
+            warnings.append(f"section {k + 1} is marked {sections[k].label!r}, but the lap only "
+                            f"closes with a grade of {100 * sections[k].grade:+.2f}% there")
+
+    at, change, half, want, knots = _elevation(s, sections, total, vertical_radius)
     for k in np.nonzero(half < 0.9 * want)[0]:
         warnings.append(f"the grade change at tick {k + 1} ({100 * sections[k - 1].grade:+.1f}% to "
                         f"{100 * sections[k].grade:+.1f}%) is eased on only {100 * half[k] / want[k]:.0f}% "
                         "of the vertical radius: the sections beside it are too short")
+    n = len(s)
+    z0 = float(at(0.0)[0])  # nonzero only if a curve spans the start line
+    profile.z, profile.grade = at(ref.s)
+    profile.z = profile.z - z0
+    for k, sec in enumerate(sections):
+        sec.z_start = float(at(sec.s_start)[0]) - z0
+        sec.z_end = float(at(sec.s_end)[0]) - z0 + (knots[-1] if n and k == n - 1 else 0.0)
+    profile.eases, profile.vertical_radius = 2 * half, vertical_radius
+    profile.crossings = crossings(ref, profile.z, pairs)
+    for c in profile.crossings:
+        if c.clearance < 0.99 * clearance:
+            over, below = section_at(sections, c.s_over, total), section_at(sections, c.s_under, total)
+            warnings.append(f"section {over.index} passes only {c.clearance:.1f} px above section "
+                            f"{below.index} where they cross (want {clearance:.1f}); give the section "
+                            "that goes underneath with --under")
+    return profile
+
+
+def section_at(sections: list[Section], s: float, total: float) -> Section:
+    """The section that contains arc length ``s``."""
+    return next((sec for sec in sections if (s - sec.s_start) % total < sec.length), sections[-1])
+
+
+def _elevation(s: np.ndarray, sections: list[Section], total: float, vertical_radius: float):
+    """Elevation along the lap for the sections' grades: (at, change, half, want, knots).
+
+    The lap rises at each section's grade from tick to tick, with z = 0 at the start
+    line (inside the last section), and each grade change is eased along a vertical
+    curve around its tick, at most half as long as the sections on either side so
+    that neighbouring curves do not overlap. ``at(x)`` gives (z, grade) at arc
+    lengths ``x`` in [0, total], before z is shifted to be 0 at the start line.
+    """
+    n = len(s)
+    breaks = np.concatenate([[0.0], s, [total]])
+    slopes = np.array([sections[-1].grade] + [sec.grade for sec in sections[:n]])
+    knots = np.concatenate([[0.0], np.cumsum(np.diff(breaks) * slopes)])
+    change = np.array([sections[k].grade - sections[k - 1].grade for k in range(n)])
+    want = vertical_radius * np.abs(change) / 2
+    half = np.minimum(want, [min(sections[k - 1].length, sections[k].length) / 2 for k in range(n)])
 
     def at(x) -> tuple[np.ndarray, np.ndarray]:
-        """Elevation and grade at arc lengths ``x`` in [0, total]."""
         x = np.asarray(x, dtype=float)
         z = np.interp(x, breaks, knots)
         g = slopes[np.clip(np.searchsorted(breaks, x, side="right") - 1, 0, n)]
@@ -254,11 +300,81 @@ def build(ref: Reference, centerline: Spline | None, tick_points: list[np.ndarra
                 g = g - np.where(d >= 0, 1.0, -1.0) * dg / (2 * h) * r
         return z, g
 
-    z0 = float(at(0.0)[0])  # nonzero only if a curve spans the start line
-    profile.z, profile.grade = at(ref.s)
-    profile.z = profile.z - z0
-    for k, sec in enumerate(sections):
-        sec.z_start = float(at(sec.s_start)[0]) - z0
-        sec.z_end = float(at(sec.s_end)[0]) - z0 + (knots[-1] if n and k == n - 1 else 0.0)
-    profile.eases, profile.vertical_radius = 2 * half, vertical_radius
-    return profile
+    return at, change, half, want, knots
+
+
+def _make_room(ref: Reference, s: np.ndarray, sections: list[Section], open_: list[int],
+               pairs: tuple[np.ndarray, np.ndarray], under: int, clearance: float,
+               vertical_radius: float, warnings: list[str]) -> None:
+    """Change the open (solved) grades as little as possible so that section ``under``
+    passes at least ``clearance`` below every part of the lap that crosses it, while
+    the lap still closes."""
+    total = ref.length
+    if not 1 <= under <= len(sections):
+        raise TrackError(f"there is no section {under}: the drawing has {len(sections)} sections")
+    own = np.array([(ref.s - sec.s_start) % total < sec.length for sec in sections]).argmax(axis=0) == under - 1
+    i, j = pairs
+    cross = own[i] ^ own[j]
+    if not cross.any():
+        raise TrackError(f"section {under} does not cross another part of the lap")
+    if len(open_) < 2:
+        raise TrackError("to pass under another part of the lap, at least two sections need an open "
+                         "grade (descent, climb or ?), so one can change while the lap still closes")
+    lower, upper = np.where(own[i], i, j)[cross], np.where(own[i], j, i)[cross]
+    lengths = np.array([sections[k].length for k in open_])
+
+    def gaps(g: np.ndarray) -> np.ndarray:
+        for k, v in zip(open_, g):
+            sections[k].grade = v
+        z = _elevation(s, sections, total, vertical_radius)[0](ref.s)[0]
+        return z[upper] - z[lower]
+
+    g = np.array([sections[k].grade for k in open_])
+    for _ in range(10):
+        gap = gaps(g)
+        worst = int(np.argmin(gap))
+        if gap[worst] >= 0.999 * clearance:
+            break
+        step = 1e-3
+        slope = np.array([(gaps(g + step * np.eye(len(g))[a])[worst] - gap[worst]) / step for a in range(len(g))])
+        # Closure (the open sections' total rise stays the same) and the clearance at the worst place.
+        g = g + np.linalg.lstsq(np.vstack([lengths, slope]), [0.0, clearance - gap[worst]], rcond=None)[0]
+    else:
+        warnings.append(f"could not make {clearance:.1f} px of room under the crossing: "
+                        f"section {under} passes {gap[worst]:.1f} px below")
+    gaps(g)
+
+
+def overlap_pairs(ref: Reference, apart: float = 10.0) -> tuple[np.ndarray, np.ndarray]:
+    """Pairs of reference rows whose road surfaces overlap on the page although they
+    are at least ``apart`` road widths apart along the lap: a crossing."""
+    p = ref.line(ref.u)
+    w = ref.w_left + ref.w_right
+    total = ref.length
+    pairs = np.array(sorted(cKDTree(p).query_pairs(float(w.max()))), dtype=int).reshape(-1, 2)
+    i, j = pairs.T
+    along = np.abs((ref.s[i] - ref.s[j] + total / 2) % total - total / 2)
+    keep = (np.linalg.norm(p[i] - p[j], axis=1) < (w[i] + w[j]) / 2) & (along > apart * w.max())
+    return i[keep], j[keep]
+
+
+def crossings(ref: Reference, z: np.ndarray, pairs: tuple[np.ndarray, np.ndarray],
+              apart: float = 10.0) -> list[Crossing]:
+    """Where the lap passes over itself: one entry per place, at the pair of rows
+    closest in height."""
+    p = ref.line(ref.u)
+    w = ref.w_left + ref.w_right
+    total = ref.length
+    i, j = pairs
+    out: list[Crossing] = []
+    seen = np.zeros(len(p), bool)
+    for k in np.argsort(np.abs(z[i] - z[j])):
+        a, b = i[k], j[k]
+        if seen[a] or seen[b]:
+            continue
+        for c in (a, b):
+            seen |= np.abs((ref.s - ref.s[c] + total / 2) % total - total / 2) < apart * w.max()
+        over, under = (a, b) if z[a] >= z[b] else (b, a)
+        out.append(Crossing(float(ref.s[over]), float(ref.s[under]), (p[a] + p[b]) / 2,
+                            float(z[over] - z[under])))
+    return out

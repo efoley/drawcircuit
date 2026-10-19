@@ -31,11 +31,14 @@ photos with shadows (`s_curve_photo`, and `hand_drawn_circuit` whose road
 deliberately bulges to twice its width on one side), and six clean digital
 circuits with a narrow road (`complex_circuit`, `flowing_circuit`, `street_circuit`,
 `hairpin_circuit`, `s_bend_circuit` and `diagonal_circuit`, the last four with sharp corners).
-`climb_circuit`, `switchback_circuit` and `wide_straight_circuit` are pencil
-photos of circuits drawn as one line, with ticks and the grades written beside
-them, processed as 4, 5 and 2 km laps with a 10 m road; the last one has a
-20 m wide start straight and street-style climbs that change grade within a few
-meters (see [Grades and scale](#grades-and-scale)):
+`climb_circuit`, `switchback_circuit`, `wide_straight_circuit` and
+`tunnel_circuit` are pencil photos of circuits drawn as one line, with ticks
+and the grades written beside them, processed as 4, 5, 2 and 8 km laps with a
+10 m road. `wide_straight_circuit` has a 20 m wide start straight and
+street-style climbs that change grade within a few meters. `tunnel_circuit`
+passes under itself through a tunnel and is traced along waypoints
+(`tunnel_circuit.route.json`; see [Grades and scale](#grades-and-scale) and
+[Routes and crossings](#routes-and-crossings)):
 
 ```sh
 uv run drawcircuit examples/climb_circuit.jpg --direction cw --length-m 4000 --track-width-m 10 \
@@ -45,6 +48,9 @@ uv run drawcircuit examples/switchback_circuit.jpg --direction cw --length-m 500
 uv run drawcircuit examples/wide_straight_circuit.jpg --direction cw --length-m 2000 --track-width-m 10 \
     --section-width-m 11=20 --grades "flat,12%,flat,-5%,flat,2%,-2%,flat,12%,-4%,flat" \
     --move-tick 11 --vertical-radius-m 100   # punchy street climbs: sharp grade changes
+uv run drawcircuit examples/tunnel_circuit.jpg --route examples/tunnel_circuit.route.json --direction cw \
+    --length-m 8000 --track-width-m 10 --vertical-radius-m 300 --under 4 --grades \
+    "flat,15%,10%,descent,1%,flat,-1%,flat,1%,3%,4%,flat,2%,6%,8%,5%,9%,2%,flat,-3%,-2%,flat,-7%,flat,8%,12%,descent"
 ```
 
 ## Driven by an LLM
@@ -161,13 +167,16 @@ prof.z, prof.grade                 # elevation (px) and grade at each reference 
   "profile": {                  // null unless tick marks were found or grades given (circuits only)
     "vertical_radius_px": 1098.623,  // of the curves that ease each grade change
     "ticks": [                  // where each tick crosses the reference line
-      {"s_px": 766.086, "point": [1347.262, 384.545], "ease_px": 16.479, "moved_px": 0.0}, ...
+      {"s_px": 762.085, "point": [1345.004, 381.243], "ease_px": 16.479, "moved_px": 0.0}, ...
       // ease_px: length of its vertical curve; moved_px: shift by --move-tick from where it is drawn
     ],
     "sections": [               // in travel order; section 1 starts at the first tick after the start
       {"index": 1, "label": "1-2%", "grade": 0.015, "solved": false,
-       "s_start_px": 766.086, "s_end_px": 954.107, "length_px": 188.021,
-       "width_px": 10.989, "z_start_px": 0.031, "z_end_px": 2.989}, ...
+       "s_start_px": 762.085, "s_end_px": 954.107, "length_px": 192.021,
+       "width_px": 10.989, "z_start_px": 0.031, "z_end_px": 3.049}, ...
+    ],
+    "crossings": [              // where the lap passes over itself (bridge and tunnel)
+      {"s_over_px": 82.01, "s_under_px": 968.116, "point": [280.152, 802.317], "clearance_px": 5.602}
     ],
     "columns": ["s_px", "z_px", "grade"],
     "rows": [[0.0, 0.0, 0.0], [2.0, 0.0, 0.0], ...]  // one per reference row; [] until grades are given
@@ -287,23 +296,59 @@ circuit: drawn centerline -> edges outer, inner
   ...
   scale 0.9102 m/px: 4000 m long, road 10.0 m wide
   7 tick marks -> 7 sections in travel order (section 1 starts at the first tick after the start line):
-  tick 7 moved +364 m along the lap from where it is drawn, so the grades close the lap
-     1     171 m   +1.50%  1-2%
+  tick 7 moved +358 m along the lap from where it is drawn, so the grades close the lap
+     1     175 m   +1.50%  1-2%
      2     202 m   +5.00%  5%
-     3     208 m   +7.00%  7%
-     4      98 m   +9.00%  9%
-     5     117 m   +3.00%  3%
-     6    1318 m   -3.00%  -3%
-     7    1886 m   +0.00%  flat
+     3     206 m   +7.00%  7%
+     4      96 m   +9.00%  9%
+     5     120 m   +3.00%  3%
+     6    1314 m   -3.00%  -3%
+     7    1887 m   +0.00%  flat
   grade changes eased on a 1000 m vertical radius, over 15 to 60 m around each tick
-  elevation +0.0 to +39.1 m relative to the start line, total climb 39.1 m
+  elevation +0.0 to +39.0 m relative to the start line, total climb 39.0 m
 ```
 
 **3D view.** `drawcircuit-3d track.json` draws a circuit from its JSON in 3D:
 the road at its elevation over a curtain coloured by grade, with heights
 exaggerated so the height range looks about 0.3 times the track's size
 (`--exaggeration` to set it; 10 for `climb_circuit`). `--view AZIM,ELEV` picks the
-viewpoint in degrees; repeat it for several views side by side.
+viewpoint in degrees; repeat it for several views side by side. Where the lap
+crosses itself, a close-up of the crossing is added, seen from the side of the
+lower road.
+
+## Routes and crossings
+
+**Routes.** Some drawings are beyond the automatic stroke joiner: many ticks
+at corners, faint pencil, a road that crosses itself, or a tunnel drawn as a
+hatched band rather than a line. The LLM driving the program can then give the
+route as waypoints in travel order, read off the page image (`1_page.png` in
+`--debug-dir`, or the overlay: working-frame px, y down), in a JSON file:
+
+```json
+{"closed": true, "points": [[128, 753], [120, 640], ..., [317, 816], [292, 805, "free"], ...]}
+```
+
+Between consecutive points the line follows the cheapest path along the ink,
+so the points only need to be within about 15 px of the line, and close
+enough together that the path cannot take a shortcut: one at each loop and
+hairpin, and either side of anything that touches the line. A point marked
+`"free"` is reached in a straight line instead of along the ink, e.g. through
+the middle of a tunnel; ticks are not looked for on free legs. `--route
+route.json` replaces the stroke joiner and the layout step; everything after
+it is the same. The CLI warns when a leg leaves the ink for long, which usually
+means a point is off the line.
+
+**Crossings.** A lap that crosses itself gets its reference line from the
+drawn centerline (there is no midline between nested edges), and its widths
+are measured only to the edges of the same part of the lap. With grades,
+`profile.crossings` lists where the lap passes over itself and the height
+between the two roads there. `--under K` makes section K the lower road: the
+open grades (`descent`, `climb`, `?`) are changed as little as possible, keeping
+the lap closed, until it passes `--clearance-m` (default 6 m) below the other
+road. That needs at least two open sections. Without `--under`, a crossing with
+less clearance is reported as a warning. For `tunnel_circuit`, section 4 runs
+through the tunnel under section 1; its descent steepens to −5.8% and the other
+descent eases to −3.8%.
 
 ## How it works
 
@@ -363,6 +408,9 @@ viewpoint in degrees; repeat it for several views side by side.
 | `--section-width-m K=W` | | road width W in meters for section K of a centerline circuit; repeatable |
 | `--width-taper X` | 5 | a change of road width is spread over X times its size |
 | `--move-tick K` | | move tick K along the lap until the grades, all given, close it |
+| `--route JSON` | | follow these waypoints along the ink instead of joining strokes |
+| `--under K` | | where the lap crosses itself, section K passes underneath |
+| `--clearance-m M` | 6 | height between the two roads at a crossing |
 | `--vertical-radius-m M` | 1000 | radius of the vertical curves that ease grade changes (needs `--length-m`; 0 = abrupt) |
 | `--direction ccw\|cw` | ccw | travel direction for circuits |
 | `--tol PX` | 2.5 | how closely the spline follows the drawn line (bigger = smoother, fewer control points) |
@@ -392,21 +440,22 @@ viewpoint in degrees; repeat it for several views side by side.
 
 ## Limitations
 
-- Figure-8 tracks work when drawn as a centerline. Drawn with two edges, the
-  edges cross at the bridge and the drawing is misread as a centerline circuit
-  (with a warning). Use `--mode edges` to get an error instead of a wrong guess.
+- Figure-8 tracks work when drawn as a centerline (with `--route` if the joiner
+  goes the wrong way at the crossing). Drawn with two edges, the edges cross at
+  the bridge and the drawing is misread as a centerline circuit (with a
+  warning). Use `--mode edges` to get an error instead of a wrong guess.
 - A segment drawn as a closed outline (both edges plus the two end caps) is
   taken as one closed line, so it is misread as a centerline circuit. Leave
   the ends of a segment open.
 - A centerline's road width is constant within each section (`--track-width`,
   or `--track-width-m` and `--section-width-m`), apart from the tapers.
-- Only circuits get a reference line. A figure-8 does not get one, since its
-  edges cross.
+- Only circuits get a reference line. A figure-8 drawn with two edges does not
+  get one, since its edges cross.
 - Output is in pixels. Real-world scale comes from `--length-m`, not from the
   paper size.
 - Handwriting is not read, by design: the LLM driving the program passes the
-  grades with `--grades`. Grades are only supported on circuits drawn as a centerline (ticks across two drawn edges
-  are not looked for).
+  grades with `--grades`. Grades are only supported on circuits drawn as a
+  centerline (ticks across two drawn edges are not looked for).
 
 ## Development
 

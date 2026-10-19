@@ -124,11 +124,14 @@ def _width_stats(a: Spline, b: Spline) -> dict[str, float]:
     return {"median": float(np.median(d)), "min": float(d.min()), "max": float(d.max())}
 
 
-def _add_reference(track: Track, fp: FitParams) -> Track:
+def _add_reference(track: Track, fp: FitParams, crossing: bool = False) -> Track:
     if track.kind != CIRCUIT:
         return track
+    # A lap that crosses itself (over a bridge or through a tunnel) has no midline
+    # between nested edges, so its reference line starts from the drawn centerline.
     ref = reference.build(track.edges[track.left_edge], track.edges[track.right_edge],
-                          cp_spacing=fp.cp_spacing, smooth=fp.smooth)
+                          cp_spacing=fp.cp_spacing, smooth=fp.smooth,
+                          center=track.centerline if crossing else None)
     if ref is None:
         track.warnings.append("could not trace a reference line between the edges")
     elif ref.min_factor < reference.MIN_FACTOR:
@@ -170,15 +173,15 @@ def build(layout: Layout, fp: FitParams, *, direction: str = "ccw",
         # closely: the road is then as wide as asked, and width changes keep their length.
         fit = lambda pts, closed: bspline.fit(pts, closed, tol=min(fp.tol, OFFSET_TOL),
                                                cp_spacing=fp.cp_spacing, smooth=fp.smooth)
-        if closed:
-            inner_is_left = abs(geometry.signed_area(left)) < abs(geometry.signed_area(right))
-            outer, inner = (right, left) if inner_is_left else (left, right)
+        if closed:  # the line runs ``direction`` round, so the inner edge is on the left when ccw
+            outer, inner = (right, left) if direction == "ccw" else (left, right)
             edges = {"outer": fit(outer, True), "inner": fit(inner, True)}
         else:
             edges = {"left": fit(left, False), "right": fit(right, False)}
         width = {"median": float(np.median(w)), "min": float(w.min()), "max": float(w.max())}
+        crossing = closed and geometry.crosses_itself(p, closed=True)
         return _add_reference(Track(layout.kind, CENTERLINE, edges, center,
-                                    direction if closed else None, width, warnings), fp)
+                                    direction if closed else None, width, warnings), fp, crossing)
 
     a, b = (c.points for c in layout.curves)
     if closed:

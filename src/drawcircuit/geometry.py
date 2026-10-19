@@ -75,3 +75,28 @@ def left_normals(tangents: np.ndarray) -> np.ndarray:
     """Unit normals pointing to the visual left of the travel direction (image coords, y down)."""
     t = unit(tangents)
     return np.column_stack([t[:, 1], -t[:, 0]])
+
+
+def crosses_itself(poly: np.ndarray, closed: bool = False, spacing: float = 2.0) -> bool:
+    """Whether the polyline crosses itself (as a figure-8 or an over/underpass does)."""
+    pts = resample(poly, spacing=spacing, closed=closed)
+    a = pts
+    b = np.roll(pts, -1, axis=0) if closed else pts[1:]
+    a = a[:len(b)]
+    n = len(a)
+    tree = cKDTree((a + b) / 2)
+    reach = 2.0 * float(np.linalg.norm(b - a, axis=1).max())
+    for i, j in tree.query_pairs(reach):
+        gap = abs(i - j)
+        if (min(gap, n - gap) if closed else gap) <= 1:  # neighbouring segments share an end
+            continue
+        d1, d2 = b[i] - a[i], b[j] - a[j]
+        den = d1[0] * d2[1] - d1[1] * d2[0]
+        if den == 0:
+            continue
+        r = a[j] - a[i]
+        t = (r[0] * d2[1] - r[1] * d2[0]) / den
+        u = (r[0] * d1[1] - r[1] * d1[0]) / den
+        if 0 <= t < 1 and 0 <= u < 1:
+            return True
+    return False

@@ -7,7 +7,7 @@ import cv2
 import numpy as np
 import pytest
 
-from drawcircuit import Params, TrackError, export, process, skeleton, synth
+from drawcircuit import Params, TrackError, export, geometry, process, profile, skeleton, synth
 from drawcircuit.profile import parse_grade
 from drawcircuit.reference import MIN_FACTOR
 
@@ -297,3 +297,68 @@ def test_wide_straight_example():
     assert prof.sections[0].width * m == pytest.approx(10, abs=0.3)
     # the start line is on the wide straight
     assert (t.reference.w_left[0] + t.reference.w_right[0]) * m == pytest.approx(20, abs=0.3)
+
+
+TUNNEL = dict(direction="cw", length_m=8000, track_width_m=10, vertical_radius_m=300,
+              grades="flat,15%,10%,descent,1%,flat,-1%,flat,1%,3%,4%,flat,2%,6%,8%,5%,9%,2%,flat,"
+                     "-3%,-2%,flat,-7%,flat,8%,12%,descent".split(","))
+
+
+def _tunnel(**kw):
+    from drawcircuit import route
+
+    return process(EXAMPLES / "tunnel_circuit.jpg",
+                   Params(route=route.load(EXAMPLES / "tunnel_circuit.route.json"), **{**TUNNEL, **kw})).track
+
+
+def test_tunnel_example():
+    """An 8 km lap traced along waypoints, which passes under itself through a tunnel."""
+    t = _tunnel(under=4)
+    prof, m = t.profile, t.m_per_px
+    assert (t.kind, t.source) == ("circuit", "centerline")
+    assert len(prof.ticks) == 27
+    assert t.reference.min_factor >= MIN_FACTOR
+    assert t.reference.length * m == pytest.approx(8000)
+    # the reference rows measure each road's own width, not the other road's at the crossing
+    assert np.all(np.abs((t.reference.w_left + t.reference.w_right) * m - 10) < 1.0)
+    [c] = prof.crossings
+    assert c.clearance * m == pytest.approx(6.0, abs=0.1)
+    assert profile.section_at(prof.sections, c.s_under, t.reference.length).index == 4
+    # both descents stay descents; the one through the tunnel is steeper to make the room
+    assert prof.sections[3].solved and prof.sections[26].solved
+    assert prof.sections[3].grade < prof.sections[26].grade < 0
+    assert sum(sec.grade * sec.length for sec in prof.sections) == pytest.approx(0, abs=1e-6)
+    assert not any("passes only" in w for w in t.warnings)
+
+
+def test_crossing_without_room_is_reported():
+    t = _tunnel()
+    [c] = t.profile.crossings
+    assert c.clearance * t.m_per_px < 1.0
+    assert any("passes only" in w and "--under" in w for w in t.warnings)
+
+
+def test_route_through_a_figure_eight():
+    """Waypoints along a centerline that crosses itself: the line goes straight through the
+    crossing, and the reference line measures widths to its own edges."""
+    from drawcircuit import route
+
+    sk = synth.make(kind="circuit", source="centerline", seed=16, shape="8")
+    truth = geometry.resample(sk.centerline, count=24, closed=True)
+    rt = route.Route(truth, np.zeros(len(truth), bool), True)
+    t = process(sk.image, Params(route=rt, length_m=3000, track_width_m=12)).track
+    assert t.reference is not None and t.reference.min_factor >= MIN_FACTOR
+    d = geometry.nearest_distances(t.centerline.sample(2000), sk.centerline, dst_closed=True)
+    assert np.percentile(d, 95) < 3.0
+    w = (t.reference.w_left + t.reference.w_right) * t.m_per_px
+    assert np.percentile(np.abs(w - 12), 99) < 0.5
+
+
+def test_route_point_off_the_drawing():
+    from drawcircuit import route
+
+    sk = synth.make(kind="circuit", source="centerline", seed=2)
+    pts = geometry.resample(sk.centerline, count=12, closed=True)
+    pts[3] += [80, 80]
+    with pytest.raises(TrackError, match="route point 4"):
+        process(sk.image, Params(route=route.Route(pts, np.zeros(12, bool), True)))

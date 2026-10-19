@@ -26,8 +26,10 @@ class Tick:
 
 
 def find(mask: np.ndarray, line: np.ndarray, closed: bool, stroke_width: float, *,
-         max_reach: float, min_angle: float = np.radians(45)) -> list[Tick]:
-    """Ticks across the polyline ``line`` (the drawn centerline) in the ink ``mask``."""
+         max_reach: float, min_angle: float = np.radians(45),
+         ignore: np.ndarray | None = None) -> list[Tick]:
+    """Ticks across the polyline ``line`` (the drawn centerline) in the ink ``mask``,
+    except where ``ignore`` (one flag per vertex) is set, such as through a tunnel."""
     h, w = mask.shape
     raster = np.full((h, w), 255, np.uint8)
     cv2.polylines(raster, [np.round(line * 16).astype(np.int32)], closed, 0, 1, cv2.LINE_8, 4)
@@ -48,13 +50,16 @@ def find(mask: np.ndarray, line: np.ndarray, closed: bool, stroke_width: float, 
         reach = float(d.max())
         if not max(1.5 * stroke_width, band + 4.0) <= reach <= max_reach or len(pts) < 5:
             continue
-        # Measure direction away from the line, where the ink is the mark's alone.
-        body = pts[d >= band + 0.5 * stroke_width] if np.sum(d >= band + 0.5 * stroke_width) >= 5 else pts
-        center = body.mean(axis=0)
-        axis = np.linalg.eigh((body - center).T @ (body - center))[1][:, 1]
-        along, across = (body - center) @ axis, (body - center) @ np.array([-axis[1], axis[0]])
-        if np.percentile(np.abs(across), 95) > max(0.6 * stroke_width, 0.15 * np.ptp(along)):
+        # The mark runs from where it touches the line to its far tip. (Its principal
+        # axis would do for long marks, but is unreliable for a short stub.)
+        center = pts.mean(axis=0)
+        axis = geometry.unit((pts[np.argmax(d)] - pts[np.argmin(d)])[None])[0]
+        rel = pts - center
+        along, across = rel @ axis, rel @ np.array([-axis[1], axis[0]])
+        if np.percentile(np.abs(across - np.median(across)), 95) > max(stroke_width, 0.2 * np.ptp(along)):
             continue  # not a straight mark: a letter or a scribble touching the line
+        if np.ptp(along) < 1.2 * np.ptp(across):
+            continue  # a dot or a blob of pencil beside the line, not a mark leaving it
         # The mark crosses the line where its axis does, near where it touches it.
         i = int(tree.query(pts[np.argmin(d)])[1])
         k = int(np.ceil(2.0 * stroke_width + 4.0))
@@ -62,13 +67,13 @@ def find(mask: np.ndarray, line: np.ndarray, closed: bool, stroke_width: float, 
         near = near % len(line) if closed else near[(near >= 0) & (near < len(line))]
         rel = line[near] - center
         i = int(near[np.argmin(np.abs(rel[:, 0] * axis[1] - rel[:, 1] * axis[0]))])
-        k = max(2, int(round(stroke_width)))
+        k = max(2, int(round(3 * stroke_width)))  # wide enough to step over a junction's kink
         if closed:
             tangent = line[(i + k) % len(line)] - line[(i - k) % len(line)]
         else:
             tangent = line[min(i + k, len(line) - 1)] - line[max(i - k, 0)]
         tangent = geometry.unit(tangent[None])[0]
-        if abs(float(axis @ tangent)) > np.cos(min_angle):
+        if abs(float(axis @ tangent)) > np.cos(min_angle) or (ignore is not None and ignore[i]):
             continue
         found.append((float(s[i]), line[i], reach))
 
@@ -85,6 +90,7 @@ def find(mask: np.ndarray, line: np.ndarray, closed: bool, stroke_width: float, 
         groups[0] = groups.pop() + groups[0]
     ticks = []
     for g in groups:
+        reach = max(f[2] for f in g)
         p = np.mean([f[1] for f in g], axis=0)
-        ticks.append(Tick(line[int(tree.query(p)[1])], max(f[2] for f in g)))
+        ticks.append(Tick(line[int(tree.query(p)[1])], reach))
     return ticks

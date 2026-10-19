@@ -66,6 +66,8 @@ def profile_to_dict(t: Track) -> dict:
             "z_start_px": round(sec.z_start, 3) if p.graded else None,
             "z_end_px": round(sec.z_end, 3) if p.graded else None,
         } for sec in p.sections],
+        "crossings": [{"s_over_px": round(c.s_over, 3), "s_under_px": round(c.s_under, 3),
+                       "point": _r(c.point), "clearance_px": round(c.clearance, 3)} for c in p.crossings],
         "columns": ["s_px", "z_px", "grade"],
         "rows": rows,
     }
