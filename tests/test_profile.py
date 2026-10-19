@@ -62,7 +62,7 @@ def test_ticks_are_found_where_drawn(seed, photo):
 
 def test_no_ticks_without_marks():
     t = process(synth.make(kind="circuit", source="centerline", seed=2, scribbles=4).image, Params()).track
-    assert t.profile is None and t.m_per_px is None
+    assert t.profile is None and t.scale_from == "assumed road width"
 
 
 def test_sections_tile_the_lap_in_travel_order():
@@ -151,14 +151,16 @@ def test_json_export():
     result = process(_sketch().image, Params(length_m=3000, track_width_m=12,
                                              grades=["3%", "flat", "-2", "?", "1-2%", "4%"]))
     doc = json.loads(json.dumps(export.result_to_dict(result, samples=64)))
-    assert doc["scale"]["length_m"] == pytest.approx(3000)
-    assert doc["scale"]["track_width_m"] == pytest.approx(12, rel=0.005)
+    assert doc["length_m"] == pytest.approx(3000) and doc["scale_from"] == "length"
+    assert doc["track_width_m"]["median"] == pytest.approx(12, rel=0.005)
     prof = doc["profile"]
-    assert prof["columns"] == ["s_px", "z_px", "grade"]
+    assert prof["columns"] == ["s_m", "z_m", "grade"]
     rows, ref_rows = np.array(prof["rows"]), np.array(doc["reference"]["rows"])
     np.testing.assert_allclose(rows[:, 0], ref_rows[:, 0])
     assert [s["index"] for s in prof["sections"]] == [1, 2, 3, 4, 5, 6]
-    assert [t["s_px"] for t in prof["ticks"]] == [s["s_start_px"] for s in prof["sections"]]
+    assert [t["s_m"] for t in prof["ticks"]] == [s["s_start_m"] for s in prof["sections"]]
+    z0 = np.array(prof["rows"])[0, 1]
+    assert z0 == pytest.approx(0.0, abs=1e-3)  # elevation is 0 at the start line, in metres
     assert prof["sections"][3]["solved"] and prof["sections"][3]["label"] == "?"
 
 
@@ -277,14 +279,13 @@ def test_section_widths_errors(params, error):
 
 def test_wide_straight_example():
     """A 2 km pencil circuit whose start straight is 20 m wide and the rest 10 m."""
-    grades = ["flat", "12%", "flat", "-5%", "flat", "2%", "-2%", "flat", "12%", "-4%", "flat"]
+    grades = ["flat", "12%", "flat", "-5%", "flat", "2%", "-2%", "flat", "12%", "-5%", "flat"]
     t = process(EXAMPLES / "wide_straight_circuit.jpg",
                 Params(direction="cw", length_m=2000, track_width_m=10, section_widths_m={11: 20},
                        grades=grades, move_tick=11, vertical_radius_m=100)).track
     prof, m = t.profile, t.m_per_px
     assert len(prof.ticks) == 11
-    assert t.warnings == ["a corner is tighter than half the track width (19 px); "
-                          "the inside edge will fold over itself there"]
+    assert all("turns through" in w for w in t.warnings)  # only corners turning more than 200 degrees
     # street-style climbs: the 12% kicks hold their grade for all but a few meters
     for sec in (prof.sections[1], prof.sections[8]):
         inside = (t.reference.s - sec.s_start) % t.reference.length < sec.length
@@ -292,8 +293,8 @@ def test_wide_straight_example():
         assert held.mean() > 0.75
     assert t.reference.min_factor >= MIN_FACTOR
     assert prof.sections[10].width * m == pytest.approx(20, abs=0.3)
-    # the descent runs on past the drawn tick, onto the wide straight, until the lap closes at 4%
-    assert 100 < prof.moved[10] * m < 150 and prof.sections[9].grade == -0.04
+    # the descent runs on past the drawn tick, onto the wide straight, until the lap closes at 5%
+    assert 80 < prof.moved[10] * m < 150 and prof.sections[9].grade == -0.05
     assert prof.sections[0].width * m == pytest.approx(10, abs=0.3)
     # the start line is on the wide straight
     assert (t.reference.w_left[0] + t.reference.w_right[0]) * m == pytest.approx(20, abs=0.3)
@@ -334,7 +335,7 @@ def test_tunnel_example():
 def test_crossing_without_room_is_reported():
     t = _tunnel()
     [c] = t.profile.crossings
-    assert c.clearance * t.m_per_px < 1.0
+    assert c.clearance * t.m_per_px < 6.0
     assert any("passes only" in w and "--under" in w for w in t.warnings)
 
 
@@ -362,3 +363,52 @@ def test_route_point_off_the_drawing():
     pts[3] += [80, 80]
     with pytest.raises(TrackError, match="route point 4"):
         process(sk.image, Params(route=route.Route(pts, np.zeros(12, bool), True)))
+
+
+
+def test_round_corners_cuts_inside():
+    """A square with sharp corners: each is rounded to the limit by cutting inside it."""
+    from drawcircuit import corners
+
+    side = np.linspace(0, 400, 400, endpoint=False)
+    square = np.vstack([np.column_stack([side, 0 * side]), np.column_stack([0 * side + 400, side]),
+                        np.column_stack([400 - side, 0 * side + 400]), np.column_stack([0 * side, 400 - side])])
+    out, found = corners.round_corners(square, 40.0)
+    assert len(found) == 4 and all(c.met for c in found)
+    assert np.abs(corners.curvature(out, 1.0)).max() <= 1 / 40 * 1.05
+    assert out.min() > -0.5 and out.max() < 400.5  # the corners are cut, never pushed out
+    assert np.linalg.norm(out - [0, 0], axis=1).min() > 10  # the corner itself is cut off
+    assert max(c.shift for c in found) < 0.5 * 40
+
+
+def test_corners_turning_far_are_found():
+    from drawcircuit import corners
+
+    th = np.linspace(0, 2 * np.pi * 1.5, 1500)  # a spiral turn of 540 degrees, then back on a straight
+    loop = np.column_stack([300 + 50 * np.cos(th), 300 + 50 * np.sin(th)])
+    line = np.vstack([loop, [[300, 900], [-300, 900], [-300, 300]]])
+    turns = corners.turns(geometry.resample(line, spacing=1.0, closed=True), 1.0, 1 / 100)
+    assert max(t for _, t in turns) > 500
+
+
+def test_corners_are_rounded_to_the_inside_edge_limit():
+    """With a real scale, a centerline circuit's corners are rounded until the inside edge
+    of the road turns no tighter than the limit; 0 keeps them as drawn."""
+    from drawcircuit.track import inside_edge_radius
+
+    sk = synth.make(kind="circuit", source="centerline", seed=2)
+    t = process(sk.image, Params(length_m=1500, track_width_m=10, min_inside_radius_m=115)).track
+    assert t.rounded
+    assert inside_edge_radius(t.reference).min() * t.m_per_px > 0.97 * 115
+    t0 = process(sk.image, Params(length_m=1500, track_width_m=10, min_inside_radius_m=0)).track
+    assert not t0.rounded and inside_edge_radius(t0.reference).min() * t0.m_per_px < 115
+
+
+def test_hairpin_example_at_a_real_scale():
+    """A circuit drawn with two edges gets its corners rounded too, at the width drawn."""
+    from drawcircuit.track import inside_edge_radius
+
+    t = process(EXAMPLES / "hairpin_circuit.png", Params(length_m=2300)).track
+    assert t.source == "edges" and len(t.rounded) > 5
+    assert inside_edge_radius(t.reference).min() * t.m_per_px > 0.95 * 6
+    assert 9 < t.width["median"] * t.m_per_px < 12

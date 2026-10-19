@@ -63,6 +63,11 @@ def _parser() -> argparse.ArgumentParser:
                          "underpass): the open grades change so it is --clearance-m below the other road")
     ap.add_argument("--clearance-m", type=float, default=6.0,
                     help="height between the two roads where the lap crosses itself (default 6)")
+    ap.add_argument("--min-inside-radius-m", type=float, default=6.0,
+                    help="round the corners of a centerline circuit until the inside edge turns no tighter "
+                         "than this, in meters (needs --track-width-m; default 6, 0 keeps them as drawn)")
+    ap.add_argument("--max-corner-turn-deg", type=float, default=200.0,
+                    help="report corners that turn through more than this (default 200)")
     ap.add_argument("--vertical-radius-m", type=float,
                     help="radius of the vertical curves that ease each grade change, in meters "
                          "(needs --length-m; default 1000, 0 for abrupt changes)")
@@ -102,7 +107,8 @@ def main(argv: list[str] | None = None) -> int:
         grades=args.grades.split(",") if args.grades else None, vertical_radius_m=args.vertical_radius_m,
         move_tick=args.move_tick, section_widths_m=section_widths or None, width_taper=args.width_taper,
         route=route.load(args.route) if args.route else None, under=args.under,
-        clearance_m=args.clearance_m,
+        clearance_m=args.clearance_m, min_inside_radius_m=args.min_inside_radius_m,
+        max_corner_turn_deg=args.max_corner_turn_deg,
     )
     try:
         result = process(args.image, params)
@@ -120,31 +126,36 @@ def main(argv: list[str] | None = None) -> int:
         render.write_debug(result, args.debug_dir)
 
     t = result.track
+    world = export.World(t)
+    m = world.m
     print(f"{t.kind}: {'two drawn edges' if t.source == 'edges' else 'drawn centerline'}"
           f" -> edges {', '.join(t.edges)}")
     for name, s in t.edges.items():
-        print(f"  {name:6s} {len(s.unique_control_points):4d} control points, length {s.length():7.1f} px, "
-              f"fit error max {s.max_error:.2f} px")
-    print(f"  track width ~{t.width['median']:.0f} px (min {t.width['min']:.0f}, max {t.width['max']:.0f})")
+        print(f"  {name:6s} {len(s.unique_control_points):4d} control points, length {s.length() * m:7.1f} m, "
+              f"fit error max {s.max_error * m:.2f} m")
+    lo, hi = t.width["min"] * m, t.width["max"] * m
+    road = f"{lo:.1f} m" if hi - lo < 0.05 else f"{lo:.1f} to {hi:.1f} m"
+    given = "from the lap length" if t.scale_from == "length" else "assumed from the road width"
+    print(f"  {t.length() * m:.0f} m long, road {road} wide (scale {given})")
     if t.reference is not None:
         r = t.reference
-        print(f"  reference line {r.line.length():.1f} px, min radius {r.min_radius:.1f} px, "
-              f"1 - w*kappa >= {r.min_factor:.2f}, within {r.max_deviation:.1f} px of the midline")
-    if t.m_per_px is not None:
-        lo, hi = t.width["min"] * t.m_per_px, t.width["max"] * t.m_per_px
-        road = f"{lo:.1f} m" if hi - lo < 0.05 else f"{lo:.1f} to {hi:.1f} m"
-        print(f"  scale {t.m_per_px:.4f} m/px: {t.length() * t.m_per_px:.0f} m long, road {road} wide")
+        print(f"  reference line {r.line.length() * m:.1f} m, min radius {r.min_radius * m:.1f} m, "
+              f"1 - w*kappa >= {r.min_factor:.2f}, within {r.max_deviation * m:.1f} m of the midline")
+    if t.rounded:
+        print(f"  rounded {len(t.rounded)} corner{'s' if len(t.rounded) != 1 else ''} so the inside edge turns no "
+              f"tighter than {args.min_inside_radius_m:g} m (the line moved up to "
+              f"{max(c.shift for c in t.rounded) * m:.1f} m)")
     if t.profile is not None:
         _print_profile(t)
     for w in t.warnings:
-        print(f"  warning: {w}")
+        print(f"  warning: {world.text(w)}")
     print(f"wrote {out}")
     return 0
 
 
 def _print_profile(t: Track) -> None:
     p = t.profile
-    scale, unit = (t.m_per_px, "m") if t.m_per_px is not None else (1.0, "px")
+    scale, unit = t.m_per_px, "m"
     n = len(p.ticks)
     print(f"  {n} tick mark{'s' if n != 1 else ''} -> {len(p.sections)} section"
           f"{'s' if len(p.sections) != 1 else ''} in travel order"
@@ -167,10 +178,11 @@ def _print_profile(t: Track) -> None:
     for c in p.crossings if p.graded else []:
         total = t.reference.length
         over, below = (profile.section_at(p.sections, s, total).index for s in (c.s_over, c.s_under))
-        print(f"  crossing at ({c.point[0]:.0f}, {c.point[1]:.0f}): section {over} passes "
+        x, y = export.World(t).point(c.point)
+        print(f"  crossing at ({x:.0f}, {y:.0f}) m: section {over} passes "
               f"{c.clearance * scale:.1f} {unit} over section {below}")
     if p.graded:
-        z = p.z * scale
+        z = np.round(p.z * scale, 1) + 0.0  # no "-0.0"
         print(f"  elevation {z.min():+.1f} to {z.max():+.1f} {unit} relative to the start line, "
               f"total climb {np.sum(np.clip(np.diff(np.append(z, z[0])), 0, None)):.1f} {unit}")
     else:

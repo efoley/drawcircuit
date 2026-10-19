@@ -10,7 +10,7 @@ import numpy as np
 from scipy.ndimage import gaussian_filter1d
 from scipy.spatial import cKDTree
 
-from . import bspline, geometry, reference
+from . import bspline, corners, geometry, reference
 from .bspline import Spline
 from .layout import CENTERLINE, CIRCUIT, Layout
 from .profile import Profile
@@ -37,8 +37,10 @@ class Track:
     width: dict[str, float] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     reference: Reference | None = None  # circuits: smooth line between the edges, with widths
+    rounded: list[corners.Corner] = field(default_factory=list)  # corners rounded to the limit
     profile: Profile | None = None      # circuits drawn as a centerline with tick marks: grades
-    m_per_px: float | None = None       # real-world scale, when the length was given
+    m_per_px: float | None = None       # real-world scale
+    scale_from: str | None = None       # "length" (given) or "assumed road width"
 
     @property
     def left_edge(self) -> str:
@@ -59,6 +61,111 @@ class Track:
         if self.centerline is not None:
             return self.centerline.length()
         return float(np.mean([e.length() for e in self.edges.values()]))
+
+
+def _rounded(layout: Layout, fp: FitParams, drawn: Spline, track_width, direction: str,
+             warnings: list[str], inside_radius: float, max_turn: float) -> Track:
+    """A circuit around the centerline ``drawn`` with its corners rounded so the inside
+    edge turns no tighter than ``inside_radius``."""
+    # Round the corners, then check the inside edge along the reference line, which is
+    # what a racing line is planned on; round with more headroom if fitting tightened it.
+    tight_fit = lambda pts, closed: bspline.fit(pts, closed, tol=min(fp.tol, OFFSET_TOL),
+                                                 cp_spacing=fp.cp_spacing, smooth=fp.smooth)
+    for headroom in (1.2, 1.4, 1.7):
+        center, rounded = _round(drawn, track_width, inside_radius, headroom, tight_fit)
+        track = _from_centerline(layout, fp, center, track_width, direction, list(warnings))
+        if track.reference is None or inside_edge_radius(track.reference).min() >= 0.97 * inside_radius:
+            break
+    track.rounded = rounded
+    # A corner keeps turning the same way, at a radius under ten times the limit (about 100 m).
+    dense = geometry.resample(center.sample(max(2000, int(center.length()))), spacing=1.0, closed=True)
+    at = lambda s: "({:.0f}, {:.0f}) px".format(*dense[int(s) % len(dense)])
+    for s, turn in corners.turns(dense, 1.0, 1.0 / (10.0 * (inside_radius + track.width["median"] / 2))):
+        if turn > max_turn:
+            track.warnings.append(f"the corner at {at(s)} turns through {turn:.0f} degrees in one go "
+                                  f"(more than {max_turn:.0f}); redraw it if it is not meant to be a spiral")
+    for c in rounded:
+        if not c.met:
+            track.warnings.append(f"the corner near {at(c.s)} could only be rounded to a radius of "
+                                  f"{c.after:.1f} px (wanted {c.limit:.1f} px): its legs are too close; redraw it wider")
+    if track.reference is not None and inside_edge_radius(track.reference).min() < 0.97 * inside_radius:
+        track.warnings.append(f"the inside edge still turns as tight as "
+                              f"{inside_edge_radius(track.reference).min():.1f} px in places "
+                              f"(wanted {inside_radius:.1f} px)")
+    return track
+
+
+def _round_drawn_edges(layout: Layout, fp: FitParams, edges: dict[str, Spline], direction: str,
+                       warnings: list[str], inside_radius: float, max_turn: float) -> Track | None:
+    """Round the corners of a circuit drawn with two edges: the road is rebuilt around
+    the midline between them, as wide as drawn at each point along it, with the
+    corners rounded. None if no midline can be traced."""
+    lp, rp = (geometry.resample(e.sample(max(1000, int(e.length()))), spacing=1.0, closed=True)
+              for e in edges.values())
+    mid = reference.midline(lp, rp)
+    if mid is None:
+        return None
+    mid = _orient_loop(mid, direction)
+    mid = _start_at(mid, np.argmin(np.linalg.norm(mid - (lp[0] + rp[0]) / 2, axis=1)))
+    center = bspline.fit(mid, True, tol=min(fp.tol, OFFSET_TOL), cp_spacing=fp.cp_spacing, smooth=fp.smooth)
+    pts = center.sample(max(2000, int(center.length())))
+    drawn = gaussian_filter1d(cKDTree(lp).query(pts)[0] + cKDTree(rp).query(pts)[0], 10.0, mode="wrap")
+    frac = np.arange(len(pts)) / len(pts)
+    width = lambda c, u: np.interp(np.asarray(u) % 1.0, frac, drawn, period=1.0)
+    track = _rounded(layout, fp, center, width, direction, warnings, inside_radius, max_turn)
+    track.source = layout.source
+    return track
+
+
+def _round(center: Spline, track_width, inside_radius: float, headroom: float,
+           fit) -> tuple[Spline, list[corners.Corner]]:
+    """Round the corners of a closed centerline so the inside edge turns no tighter
+    than ``inside_radius``, given the road width along it."""
+    u = center.params(max(2000, int(center.length())))
+    w = track_width(center, u) if callable(track_width) else np.full(len(u), float(track_width))
+    frac = np.arange(len(u)) / len(u)
+    radius = lambda f: inside_radius + np.interp(f, frac, w, period=1.0) / 2
+    line, rounded = corners.round_corners(center(u), radius, max_shift=2.0 * float(w.max()), headroom=headroom)
+    return (fit(line, True) if rounded else center), rounded
+
+
+def inside_edge_radius(ref: Reference) -> np.ndarray:
+    """Radius of the inside edge at each reference row, px: the reference line's
+    radius less the width on the side it turns towards (inf on a straight)."""
+    d1, d2 = ref.line(ref.u, 1), ref.line(ref.u, 2)
+    kappa = np.sum(d2 * geometry.left_normals(d1), axis=1) / np.sum(d1 * d1, axis=1)
+    inside = np.where(kappa > 0, ref.w_left, ref.w_right)
+    with np.errstate(divide="ignore"):
+        return 1.0 / np.abs(kappa) - inside
+
+
+def _from_centerline(layout: Layout, fp: FitParams, center: Spline, track_width, direction: str,
+                     warnings: list[str]) -> Track:
+    """Edges offset to either side of a fitted centerline, and the reference line."""
+    closed = layout.kind == CIRCUIT
+    u = center.params(max(400, int(center.length() / 2)))
+    p, dp, ddp = center(u), center(u, 1), center(u, 2)
+    normal = geometry.left_normals(dp)
+    speed = np.linalg.norm(dp, axis=1)
+    curvature = np.abs(dp[:, 0] * ddp[:, 1] - dp[:, 1] * ddp[:, 0]) / np.maximum(speed, 1e-9) ** 3
+    w = track_width(center, u) if callable(track_width) else np.full(len(u), float(track_width))
+    if np.max(curvature * w / 2) > 1.0:
+        worst = int(np.argmax(curvature * w))
+        warnings.append(f"a corner is tighter than half the track width ({w[worst]:.1f} px); "
+                        "the inside edge will fold over itself there")
+    left, right = p + normal * w[:, None] / 2, p - normal * w[:, None] / 2
+    # The edges are offsets of a line that is already smooth, so they are fitted
+    # closely: the road is then as wide as asked, and width changes keep their length.
+    fit = lambda pts, closed: bspline.fit(pts, closed, tol=min(fp.tol, OFFSET_TOL),
+                                           cp_spacing=fp.cp_spacing, smooth=fp.smooth)
+    if closed:  # the line runs ``direction`` round, so the inner edge is on the left when ccw
+        outer, inner = (right, left) if direction == "ccw" else (left, right)
+        edges = {"outer": fit(outer, True), "inner": fit(inner, True)}
+    else:
+        edges = {"left": fit(left, False), "right": fit(right, False)}
+    width = {"median": float(np.median(w)), "min": float(w.min()), "max": float(w.max())}
+    return _add_reference(Track(layout.kind, CENTERLINE, edges, center, direction if closed else None,
+                                width, warnings), fp)
 
 
 def _orient_loop(poly: np.ndarray, direction: str) -> np.ndarray:
@@ -124,14 +231,14 @@ def _width_stats(a: Spline, b: Spline) -> dict[str, float]:
     return {"median": float(np.median(d)), "min": float(d.min()), "max": float(d.max())}
 
 
-def _add_reference(track: Track, fp: FitParams, crossing: bool = False) -> Track:
+def _add_reference(track: Track, fp: FitParams) -> Track:
     if track.kind != CIRCUIT:
         return track
-    # A lap that crosses itself (over a bridge or through a tunnel) has no midline
-    # between nested edges, so its reference line starts from the drawn centerline.
+    # A centerline drawing's edges are offsets of its centerline, so the reference line
+    # starts from that line itself; tracing the midline between the edges would only
+    # add noise. (A lap that crosses itself has no midline between nested edges anyway.)
     ref = reference.build(track.edges[track.left_edge], track.edges[track.right_edge],
-                          cp_spacing=fp.cp_spacing, smooth=fp.smooth,
-                          center=track.centerline if crossing else None)
+                          cp_spacing=fp.cp_spacing, smooth=fp.smooth, center=track.centerline)
     if ref is None:
         track.warnings.append("could not trace a reference line between the edges")
     elif ref.min_factor < reference.MIN_FACTOR:
@@ -142,9 +249,15 @@ def _add_reference(track: Track, fp: FitParams, crossing: bool = False) -> Track
 
 
 def build(layout: Layout, fp: FitParams, *, direction: str = "ccw",
-          track_width: float | Callable[[Spline, np.ndarray], np.ndarray] = 60.0) -> Track:
+          track_width: float | Callable[[Spline, np.ndarray], np.ndarray] = 60.0,
+          inside_radius: float | None = None, max_turn: float = 200.0) -> Track:
     """Oriented, aligned track edges. For a centerline drawing ``track_width`` is the
-    road width in px, or a function of (centerline, parameters) giving it along the line."""
+    road width in px, or a function of (centerline, parameters) giving it along the line.
+
+    With ``inside_radius`` (px), a centerline circuit's corners are rounded until the
+    inside edge turns no tighter than that, and corners turning through more than
+    ``max_turn`` degrees are reported.
+    """
     fit = lambda pts, closed: bspline.fit(pts, closed, tol=fp.tol, cp_spacing=fp.cp_spacing,
                                            smooth=fp.smooth)
     warnings = list(layout.warnings)
@@ -157,31 +270,10 @@ def build(layout: Layout, fp: FitParams, *, direction: str = "ccw",
             line = _start_at(line, straight_middle(line))
         elif line[0].sum() > line[-1].sum():  # segments start at the end nearer the top-left
             line = line[::-1]
-        center = fit(line, closed)
-        u = center.params(max(400, int(center.length() / 2)))
-        p, dp, ddp = center(u), center(u, 1), center(u, 2)
-        normal = geometry.left_normals(dp)
-        speed = np.linalg.norm(dp, axis=1)
-        curvature = np.abs(dp[:, 0] * ddp[:, 1] - dp[:, 1] * ddp[:, 0]) / np.maximum(speed, 1e-9) ** 3
-        w = track_width(center, u) if callable(track_width) else np.full(len(u), float(track_width))
-        if np.max(curvature * w / 2) > 1.0:
-            worst = int(np.argmax(curvature * w))
-            warnings.append(f"a corner is tighter than half the track width ({w[worst]:.0f} px); "
-                            "the inside edge will fold over itself there")
-        left, right = p + normal * w[:, None] / 2, p - normal * w[:, None] / 2
-        # The edges are offsets of a line that is already smooth, so they are fitted
-        # closely: the road is then as wide as asked, and width changes keep their length.
-        fit = lambda pts, closed: bspline.fit(pts, closed, tol=min(fp.tol, OFFSET_TOL),
-                                               cp_spacing=fp.cp_spacing, smooth=fp.smooth)
-        if closed:  # the line runs ``direction`` round, so the inner edge is on the left when ccw
-            outer, inner = (right, left) if direction == "ccw" else (left, right)
-            edges = {"outer": fit(outer, True), "inner": fit(inner, True)}
-        else:
-            edges = {"left": fit(left, False), "right": fit(right, False)}
-        width = {"median": float(np.median(w)), "min": float(w.min()), "max": float(w.max())}
-        crossing = closed and geometry.crosses_itself(p, closed=True)
-        return _add_reference(Track(layout.kind, CENTERLINE, edges, center,
-                                    direction if closed else None, width, warnings), fp, crossing)
+        drawn = fit(line, closed)
+        if not (closed and inside_radius):
+            return _from_centerline(layout, fp, drawn, track_width, direction, warnings)
+        return _rounded(layout, fp, drawn, track_width, direction, warnings, inside_radius, max_turn)
 
     a, b = (c.points for c in layout.curves)
     if closed:
@@ -189,6 +281,10 @@ def build(layout: Layout, fp: FitParams, *, direction: str = "ccw",
         outer = _start_at(outer, straight_middle(outer))
         inner = _start_at(inner, np.argmin(np.linalg.norm(inner - outer[0], axis=1)))
         edges = {"outer": fit(outer, True), "inner": fit(inner, True)}
+        if inside_radius:
+            rounded = _round_drawn_edges(layout, fp, edges, direction, warnings, inside_radius, max_turn)
+            if rounded is not None:
+                return rounded
     else:
         same = np.linalg.norm(a[0] - b[0]) + np.linalg.norm(a[-1] - b[-1])
         swapped = np.linalg.norm(a[0] - b[-1]) + np.linalg.norm(a[-1] - b[0])

@@ -261,7 +261,7 @@ def build(ref: Reference, centerline: Spline | None, tick_points: list[np.ndarra
         if c.clearance < 0.99 * clearance:
             over, below = section_at(sections, c.s_over, total), section_at(sections, c.s_under, total)
             warnings.append(f"section {over.index} passes only {c.clearance:.1f} px above section "
-                            f"{below.index} where they cross (want {clearance:.1f}); give the section "
+                            f"{below.index} where they cross (want {clearance:.1f} px); give the section "
                             "that goes underneath with --under")
     return profile
 

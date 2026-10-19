@@ -47,6 +47,9 @@ class Params:
     route: route_mod.Route | None = None  # follow these waypoints instead of joining strokes
     under: int | None = None            # section that passes under where the lap crosses itself
     clearance_m: float = 6.0            # how far above it the other road must be (needs length_m)
+    min_inside_radius_m: float = 6.0    # round centerline corners so the inside edge is no tighter; 0: as drawn
+    max_corner_turn_deg: float = 200.0  # report corners that turn through more (spirals)
+    assumed_width_m: float = 10.0       # without length_m, the road is taken to be this wide
 
     def px(self, value: float | None, default: float) -> float:
         return float(value) if value is not None else default * self.working_size / REFERENCE_SIZE
@@ -138,16 +141,11 @@ def _finish(p: Params, lay: Layout, ink: preprocess.Ink, stroke_width: float, di
     fit = FitParams(tol=p.px(p.tol, 2.5), cp_spacing=p.px(p.cp_spacing, 60), smooth=p.smooth)
     t = _scaled_build(lay, fit, p, diag, marks)
     if t.reference is not None and (marks or p.grades is not None):
-        if t.m_per_px is not None:
-            radius = (p.vertical_radius_m if p.vertical_radius_m is not None
-                      else profile.VERTICAL_RADIUS_M) / t.m_per_px
-        else:  # no scale: a quarter of the lap, which is 1000 m on a 4 km lap
-            radius = 0.25 * t.length()
-        if p.under is not None and t.m_per_px is None:
-            raise ValueError("passing under another road needs the real length too, for the clearance")
+        radius = (p.vertical_radius_m if p.vertical_radius_m is not None
+                  else profile.VERTICAL_RADIUS_M) / t.m_per_px
         t.profile = profile.build(t.reference, t.centerline, [m.point for m in marks], p.grades,
                                   t.warnings, vertical_radius=radius, move_tick=p.move_tick, under=p.under,
-                                  clearance=p.clearance_m / t.m_per_px if t.m_per_px else 0.0)
+                                  clearance=p.clearance_m / t.m_per_px)
     elif p.grades is not None:
         raise TrackError("grades need a circuit with a reference line")
     elif marks:
@@ -170,6 +168,8 @@ def _scaled_build(lay: layout_mod.Layout, fit: FitParams, p: Params, diag: float
         if lay.source != CENTERLINE or not lay.curves[0].closed:
             raise TrackError("section widths need a circuit drawn as a centerline")
     metric = p.track_width_m is not None and lay.source == CENTERLINE
+    rounds = bool(p.min_inside_radius_m) and p.length_m is not None and lay.kind == CIRCUIT
+    rounds = rounds and (metric or lay.source != CENTERLINE)  # a centerline needs its width in meters
     points = [m.point for m in marks]
 
     def width(m_per_px: float | None):
@@ -182,19 +182,30 @@ def _scaled_build(lay: layout_mod.Layout, fit: FitParams, p: Params, diag: float
         return lambda center, u: profile.section_widths(center, points, widths, default, p.width_taper)(u)
 
     m = None
-    if metric:  # first guess at the scale, from the drawn line
-        line = lay.curves[0]
-        pts = geometry.resample(line.points, spacing=2.0, closed=line.closed)
-        pts = gaussian_filter1d(pts, 2.0, axis=0, mode="wrap" if line.closed else "nearest")
-        m = p.length_m / geometry.length(pts, line.closed)
-    t = track.build(lay, fit, direction=p.direction, track_width=width(m))
-    if p.length_m is None:
+    if metric or rounds:  # first guess at the scale, from the drawn line(s)
+        lengths = []
+        for line in lay.curves:
+            pts = geometry.resample(line.points, spacing=2.0, closed=line.closed)
+            pts = gaussian_filter1d(pts, 2.0, axis=0, mode="wrap" if line.closed else "nearest")
+            lengths.append(geometry.length(pts, line.closed))
+        m = p.length_m / float(np.mean(lengths))
+
+    def build(m_per_px: float | None) -> Track:
+        inside = p.min_inside_radius_m / m_per_px if rounds else None
+        return track.build(lay, fit, direction=p.direction, track_width=width(m_per_px),
+                           inside_radius=inside, max_turn=p.max_corner_turn_deg)
+
+    t = build(m)
+    if p.length_m is None:  # no real length: take the road to be the usual width
+        t.m_per_px, t.scale_from = p.assumed_width_m / t.width["median"], "assumed road width"
+        t.warnings.append(f"no real length given, so the road is taken to be {p.assumed_width_m:g} m wide "
+                          "and corners are not rounded; give the lap length for a real scale")
         return t
-    t.m_per_px = p.length_m / t.length()
+    t.m_per_px, t.scale_from = p.length_m / t.length(), "length"
     for _ in range(3):
-        if not metric or abs(t.m_per_px - m) <= 0.002 * m:
+        if not (metric or rounds) or abs(t.m_per_px - m) <= 0.002 * m:
             break
         m = t.m_per_px
-        t = track.build(lay, fit, direction=p.direction, track_width=width(m))
-        t.m_per_px = p.length_m / t.length()
+        t = build(m)
+        t.m_per_px, t.scale_from = p.length_m / t.length(), "length"
     return t

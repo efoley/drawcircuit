@@ -110,11 +110,35 @@ def test_json_export_is_self_consistent():
         u = np.linspace(a, b, 64, endpoint=not edge["periodic"])
         ours = np.array([de_boor(t, c, k, x) for x in u])
         np.testing.assert_allclose(ours, edge["samples"], atol=0.01)
-    assert ref["columns"] == ["s_px", "u", "w_left", "w_right"]
+    assert ref["columns"] == ["s_m", "u", "w_left_m", "w_right_m"]
     rows = np.array(ref["rows"])
-    np.testing.assert_allclose(np.diff(rows[:, 0]), ref["spacing_px"], atol=0.002)
-    assert abs(len(rows) * ref["spacing_px"] - ref["line"]["length_px"]) < 0.5
+    np.testing.assert_allclose(np.diff(rows[:, 0]), ref["spacing_m"], atol=0.002)
+    assert abs(len(rows) * ref["spacing_m"] - ref["line"]["length_m"]) < 0.5
+    assert len(rows) * ref["spacing_m"] == pytest.approx(doc["length_m"], abs=0.01)
     assert ref["min_1_minus_w_kappa"] >= 0.3
+
+
+def test_json_is_in_world_metres():
+    """Metres, y up, origin at the start/finish point; no pixel or image information."""
+    result = process(synth.make(kind="circuit", source="edges", seed=1).image, Params())
+    doc = json.loads(json.dumps(export.result_to_dict(result, samples=64)))
+    assert doc["version"] == 2 and doc["units"] == "m" and "frame" not in doc
+    assert "px" not in json.dumps(doc)
+    # no length given: the road is taken to be 10 m wide
+    assert doc["scale_from"] == "assumed road width"
+    assert doc["track_width_m"]["median"] == pytest.approx(10.0)
+    ref = doc["reference"]
+    np.testing.assert_allclose(ref["line"]["samples"][0], [0, 0], atol=0.01)
+    # y is flipped: a lap that runs counter-clockwise on the page has a positive area in y-up axes
+    pts = np.array(ref["line"]["samples"])
+    area = 0.5 * np.sum(pts[:, 0] * np.roll(pts[:, 1], -1) - np.roll(pts[:, 0], -1) * pts[:, 1])
+    assert doc["direction"] == "ccw" and area > 0
+    # the left edge lies to the left of travel, along (-t_y, t_x)
+    t = np.gradient(pts, axis=0)
+    left = np.column_stack([-t[:, 1], t[:, 0]])
+    to_edge = np.array(doc["edges"][doc["left_edge"]]["samples"])
+    near = to_edge[np.argmin(np.linalg.norm(to_edge[:, None] - pts[None], axis=2), axis=0)]
+    assert np.mean(np.sum((near - pts) * left, axis=1) > 0) > 0.95
 
 
 def test_cli_writes_outputs(tmp_path):

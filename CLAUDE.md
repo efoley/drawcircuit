@@ -41,12 +41,18 @@ Assume an LLM (you) runs drawcircuit for the user, with the photo in front of it
    pass the section that goes underneath with `--under`.
 5. Tell the user what you read and assumed: the direction, labels that were
    hard to read, how you took a range such as `1-2%`, and any solved or
-   moved sections.
+   moved sections. At a real scale corners are rounded to a 6 m inside edge;
+   pass on the warnings about hairpins that could not be rounded and corners
+   that turn more than 200° (spirals), which only the user can redraw.
 
 ## Conventions
 
-- The racer line optimiser reads the JSON (`reference`, `left_edge` /
-  `right_edge`, `profile`, `scale`). Keep format changes additive.
-- All coordinates are px of the working frame with y down. `scale.m_per_px`
-  converts to meters.
+- racer (the line optimiser) and racer-game read the JSON (`reference`,
+  `left_edge` / `right_edge`, `profile`). Agree format changes with them first;
+  keep them additive within a version, and bump the version when one breaks.
+- The JSON is in world metres (format version 2): x right and y up on the
+  drawing, z up, origin at the start/finish point, and nothing about the image.
+  Inside the code everything is in working-frame px with y down, and
+  `export.World` converts; keep pixels out of the file, warnings included
+  (write lengths as "N px" and points as "(x, y) px" so the export converts them).
 - `uv run pytest` runs the tests. The `*_debug/` folders are not committed.

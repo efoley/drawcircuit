@@ -15,7 +15,10 @@ two track edges.
   either side measured along its normal: the input a racing-line optimiser
   works from (x, y, w_left, w_right).
 - Takes a **real-world scale**: give the lap length in meters (and, for a
-  centerline drawing, the road width in meters).
+  centerline drawing, the road width in meters). At a real scale, corners too
+  tight for a real road are **rounded** until the inside edge turns at a radius
+  of at least 6 m, and corners that turn through more than 200° in one go are
+  reported.
 - Reads **grade marks**: short ticks drawn across a centerline split the lap
   into sections. Give each section's grade and it writes an elevation profile,
   and `drawcircuit-3d` draws the circuit in 3D.
@@ -31,6 +34,8 @@ photos with shadows (`s_curve_photo`, and `hand_drawn_circuit` whose road
 deliberately bulges to twice its width on one side), and six clean digital
 circuits with a narrow road (`complex_circuit`, `flowing_circuit`, `street_circuit`,
 `hairpin_circuit`, `s_bend_circuit` and `diagonal_circuit`, the last four with sharp corners).
+`hairpin_circuit` is processed as a 2.3 km lap (`--length-m 2300`, a road about
+10 m wide as drawn), so its corners are rounded to the 6 m limit.
 `climb_circuit`, `switchback_circuit`, `wide_straight_circuit` and
 `tunnel_circuit` are pencil photos of circuits drawn as one line, with ticks
 and the grades written beside them, processed as 4, 5, 2 and 8 km laps with a
@@ -46,7 +51,7 @@ uv run drawcircuit examples/climb_circuit.jpg --direction cw --length-m 4000 --t
 uv run drawcircuit examples/switchback_circuit.jpg --direction cw --length-m 5000 --track-width-m 10 \
     --grades "2%,6%,5%,7%,5%,flat,descent,flat,1%"
 uv run drawcircuit examples/wide_straight_circuit.jpg --direction cw --length-m 2000 --track-width-m 10 \
-    --section-width-m 11=20 --grades "flat,12%,flat,-5%,flat,2%,-2%,flat,12%,-4%,flat" \
+    --section-width-m 11=20 --grades "flat,12%,flat,-5%,flat,2%,-2%,flat,12%,-5%,flat" \
     --move-tick 11 --vertical-radius-m 100   # punchy street climbs: sharp grade changes
 uv run drawcircuit examples/tunnel_circuit.jpg --route examples/tunnel_circuit.route.json --direction cw \
     --length-m 8000 --track-width-m 10 --vertical-radius-m 300 --under 4 --grades \
@@ -90,16 +95,17 @@ The CLI prints what it found:
 
 ```
 circuit: two drawn edges -> edges outer, inner
-  outer   223 control points, length  8048.7 px, fit error max 3.53 px
-  inner   223 control points, length  7938.1 px, fit error max 2.92 px
-  track width ~17 px (min 15, max 19)
-  reference line 7990.5 px, min radius 18.4 px, 1 - w*kappa >= 0.54, within 0.5 px of the midline
+  outer   223 control points, length  4825.9 m, fit error max 2.12 m
+  inner   223 control points, length  4759.6 m, fit error max 1.75 m
+  4791 m long, road 9.2 to 11.3 m wide (scale assumed from the road width)
+  reference line 4791.0 m, min radius 11.0 m, 1 - w*kappa >= 0.54, within 0.3 m of the midline
+  warning: no real length given, so the road is taken to be 10 m wide and corners are not rounded; give the lap length for a real scale
 ```
 
 From Python:
 
 ```python
-from drawcircuit import process, Params
+from drawcircuit import export, process, Params
 
 result = process("sketch.jpg", Params())
 track = result.track
@@ -116,27 +122,34 @@ ref.s, ref.u, ref.w_left, ref.w_right   # one row every 2 px of arc length
 
 result = process("climb.jpg", Params(direction="cw", length_m=4000, track_width_m=10,
                                      grades=["1-2%", "5%", "7%", "9%", "3%", "descent", "flat"]))
-result.track.m_per_px              # meters per px, when length_m is given
+result.track.m_per_px              # meters per px (from length_m, or a 10 m road)
 prof = result.track.profile        # circuits drawn as a centerline with tick marks, or given grades
 prof.ticks, prof.sections          # tick positions (s along the reference line) and the sections between them
 prof.z, prof.grade                 # elevation (px) and grade at each reference row
+export.result_to_dict(result)      # the JSON document, in metres
 ```
 
 ## Output format (`*.track.json`)
 
+Everything is in metres, in a right-handed frame: x to the right of the
+drawing, y towards its top, z up, with the origin at the lap's start/finish
+point. Nothing in the file refers to the image it came from. (From Python,
+`result.track` is in working-frame pixels, y down, and `track.m_per_px` converts.)
+
 ```jsonc
 {
+  "format": "drawcircuit-track",
+  "version": 2,
+  "units": "m",
+  "axes": "x right and y up on the drawing, z up; origin at the start/finish point",
   "type": "circuit",            // or "segment"
-  "source": "edges",            // "edges": two edges drawn; "centerline": one line drawn and offset
-  "direction": "ccw",           // circuits only: travel direction as seen on the page
-  "left_edge": "inner",         // the edge on the left in the direction of travel
-  "right_edge": "outer",
-  "frame": {                    // coordinate system of every point below
-    "width": 1600, "height": 1236, "units": "px", "y_axis": "down",
-    "paper_detected": true,     // the sheet was found in the photo and straightened
-    "input_to_frame": [[...]]   // 3x3 homography, input image px -> frame px
-  },
-  "track_width_px": {"median": 70.2, "min": 67.9, "max": 73.4},
+  "source": "centerline",       // "edges": two edges drawn; "centerline": one line drawn and offset
+  "direction": "cw",            // circuits only: travel direction as seen on the drawing
+  "left_edge": "outer",         // the edge on the left in the direction of travel
+  "right_edge": "inner",
+  "length_m": 4000.0,           // the lap, along the reference line (a segment: its centerline)
+  "scale_from": "length",       // "length": --length-m given; "assumed road width": road taken as 10 m wide
+  "track_width_m": {"median": 9.999, "min": 9.999, "max": 9.999},
   "edges": {
     "outer": {                  // circuits: outer/inner, segments: left/right
       "degree": 3,
@@ -144,42 +157,37 @@ prof.z, prof.grade                 # elevation (px) and grade at each reference 
       "domain": [0.0, 1.0],
       "knots": [...],           // len(knots) == len(control_points) + degree + 1
       "control_points": [[x, y], ...],
-      "length_px": 3391.7,
-      "fit_error_px": {"rms": 0.5, "max": 1.1},
+      "length_m": 4033.17,
+      "fit_error_m": {"rms": 0.146, "max": 0.487},
       "samples": [[x, y], ...]  // the curve sampled evenly in parameter
     },
     "inner": {...}
   },
-  "centerline": null,           // the fitted centerline when source == "centerline"
+  "centerline": {...},          // the fitted centerline (null for two drawn edges without rounding)
   "reference": {                // circuits only, else null
-    "line": {...},              // closed spline, same fields as an edge
-    "smoothing_sigma_px": 7.68, // Gaussian smoothing applied to the true midline
-    "max_midline_deviation_px": 2.461,
-    "min_radius_px": 16.07,
-    "min_1_minus_w_kappa": 0.373, // min over the lap of 1 - w_inside * |curvature|
-    "spacing_px": 1.999885,   // lap length / number of rows, about 2 px
-    "columns": ["s_px", "u", "w_left", "w_right"],
-    "rows": [[0.0, 0.0, 10.144, 10.137], [2.0, 0.0004175, 10.144, 10.137], ...]
-  },
-  "scale": {                    // null unless the real length was given
-    "m_per_px": 0.910230618, "length_m": 4000.0, "track_width_m": 10.0
+    "line": {...},              // closed spline, same fields as an edge; starts at (0, 0)
+    "smoothing_sigma_m": 1.826,
+    "max_midline_deviation_m": 0.478,
+    "min_radius_m": 11.09,
+    "min_1_minus_w_kappa": 0.5478, // min over the lap of 1 - w_inside * |curvature|
+    "spacing_m": 1.826484,     // length_m / number of rows
+    "columns": ["s_m", "u", "w_left_m", "w_right_m"],
+    "rows": [[0.0, 0.0, 5.0, 4.999], [1.826, 0.0004567, 5.0, 4.999], ...]
   },
   "profile": {                  // null unless tick marks were found or grades given (circuits only)
-    "vertical_radius_px": 1098.623,  // of the curves that ease each grade change
+    "vertical_radius_m": 1000.0, // of the curves that ease each grade change
     "ticks": [                  // where each tick crosses the reference line
-      {"s_px": 762.085, "point": [1345.004, 381.243], "ease_px": 16.479, "moved_px": 0.0}, ...
-      // ease_px: length of its vertical curve; moved_px: shift by --move-tick from where it is drawn
+      {"s_m": 695.89, "point": [673.121, -122.333], "ease_m": 15.0, "moved_m": 0.0}, ...
+      // ease_m: length of its vertical curve; moved_m: shift by --move-tick from where it is drawn
     ],
     "sections": [               // in travel order; section 1 starts at the first tick after the start
-      {"index": 1, "label": "1-2%", "grade": 0.015, "solved": false,
-       "s_start_px": 762.085, "s_end_px": 954.107, "length_px": 192.021,
-       "width_px": 10.989, "z_start_px": 0.031, "z_end_px": 3.049}, ...
+      {"index": 1, "label": "1-2%", "grade": 0.015, "solved": false, "s_start_m": 695.89, "s_end_m": 871.233, "length_m": 175.342, "width_m": 9.997, "z_start_m": 0.028, "z_end_m": 2.783}, ...
     ],
-    "crossings": [              // where the lap passes over itself (bridge and tunnel)
-      {"s_over_px": 82.01, "s_under_px": 968.116, "point": [280.152, 802.317], "clearance_px": 5.602}
+    "crossings": [              // where the lap passes over itself (tunnel_circuit)
+      {"s_over_m": 95.795, "s_under_m": 1078.251, "point": [-5.7, -96.45], "clearance_m": 6.0}
     ],
-    "columns": ["s_px", "z_px", "grade"],
-    "rows": [[0.0, 0.0, 0.0], [2.0, 0.0, 0.0], ...]  // one per reference row; [] until grades are given
+    "columns": ["s_m", "z_m", "grade"],
+    "rows": [[0.0, 0.0, 0.0], [1.826, 0.0, 0.0], ...]  // one per reference row; [] until grades are given
   },
   "warnings": []
 }
@@ -188,14 +196,15 @@ prof.z, prof.grade                 # elevation (px) and grade at each reference 
 **The reference line.** Racing-line optimisers describe the road as a smooth
 reference line plus the width to either side of it. `reference.line` is a
 closed spline between the edges that starts beside their start and runs in
-the direction of travel. Each row gives the arc length `s_px` along the line, its
-parameter `u`, and the distances `w_left`, `w_right` (both positive) from the
+the direction of travel. Each row gives the arc length `s_m` along the line, its
+parameter `u`, and the distances `w_left_m`, `w_right_m` (both positive) from the
 point `line(u)` to the `left_edge` and `right_edge`, measured along the line's
-normal. So `line(u) + w_left * n` lies on the left edge and `line(u) - w_right * n`
-on the right edge, where `n` is the unit normal pointing to the left.
+normal. So `line(u) + w_left_m * n` lies on the left edge and `line(u) - w_right_m * n`
+on the right edge, where `n = (-t_y, t_x)` is the unit normal pointing to the left
+of the unit tangent `t`.
 
-The line is the true midline (the points equally far from both edges),
-smoothed just enough that `1 - w_inside * |curvature| >= 0.3` everywhere, where
+The line starts as the drawn centerline (for a centerline drawing) or the true
+midline (the points equally far from two drawn edges), smoothed just enough that `1 - w_inside * |curvature| >= 0.3` everywhere, where
 `w_inside` is the width on the side the line turns towards. Where that factor
 reaches 0, the normals of neighbouring points cross inside the road. Sharp
 corners need the smoothing: it widens them and moves the line towards their
@@ -218,7 +227,7 @@ circuits pass `extrapolate="periodic"`.
 
 **Conventions.**
 
-- Circuits run counter-clockwise on the page by default (`--direction cw` to flip).
+- Circuits run counter-clockwise on the drawing by default (`--direction cw` to flip).
   Seen in the direction of travel, the inner edge is then on the left.
   `left_edge` and `right_edge` name the edges on each side.
 - Circuits start halfway along their longest straight, with both edges side by
@@ -227,27 +236,27 @@ circuits pass `extrapolate="periodic"`.
   on its least curved stretch.
 - Segments start at the end nearer the top-left of the page. `left` and `right`
   are relative to that direction of travel.
-- Coordinates are pixels of the working frame: the straightened sheet (or the
-  whole image), scaled so its long side is `--working-size` (default 1600).
-  The y axis points down. If you need y up, flip it as `y' = height - y`.
-  With `--length-m`, multiply by `scale.m_per_px` for meters.
+- Without `--length-m` the road is taken to be 10 m wide (`scale_from` says
+  which), corners are not rounded, and a warning says so.
+- Format version 2 (metres) replaced version 1 (working-frame pixels with an
+  optional `scale.m_per_px`); key names changed from `_px` to `_m`, so a version 1
+  reader fails rather than misreads.
 
 ## Grades and scale
 
 **Scale.** `--length-m 4000` makes the lap 4000 m long, measured along the
 reference line (a segment's length is measured along its centerline, or the
-mean of its edges). Everything in the JSON stays in pixels; `scale.m_per_px`
-converts. For a centerline drawing, `--track-width-m 10` sets the road width
-in meters instead of pixels. The road width changes the reference line and
-so the lap length in pixels, so the track is rebuilt until both match (once
-or twice).
+mean of its edges). For a centerline drawing, `--track-width-m 10` sets the
+road width in meters. The road width changes the reference line and so the
+lap length on the drawing, so the track is rebuilt until both match (once or
+twice). Without `--length-m`, the road is taken to be 10 m wide.
 
 **Road widths.** A centerline drawing's road can change width from section to
 section: `--section-width-m 11=20` makes section 11 20 m wide and the rest
 `--track-width-m` wide (repeat it for more sections). Each change is spread
 smoothly over 5 times its size, centred on the tick (`--width-taper`), so 10 m
 to 20 m takes 50 m. The CLI lists each section's width and the JSON gives it
-as `width_px`; the reference rows' `w_left` and `w_right` follow it.
+as `width_m`; the reference rows' `w_left_m` and `w_right_m` follow it.
 
 **Ticks.** On a circuit drawn as one line, short marks drawn across the line
 split it into sections. A tick may cross the line or touch it from one side.
@@ -261,15 +270,15 @@ by commas. A grade is rise over horizontal run in percent: `5%` or `5`, `-3%`,
 `flat`, or a range such as `1-2%`, which takes its midpoint. `descent`,
 `climb` or `?` leave the grade open: those sections share the one grade that
 brings the lap back to the height it started at, and the CLI marks them as
-solved. The elevation `z` is 0 at the start line and rises at each section's
-grade. It is in pixels like `s`; multiply by `m_per_px` for meters.
+solved. The elevation `z_m` is 0 at the start line and rises at each section's
+grade.
 
 **Moving a tick.** To set a section's average grade instead of solving it,
 give every section a grade and let one tick move: `--move-tick K` slides tick
 K along the lap until the lap closes. `--grades "...,3%,-3%,flat" --move-tick 7`
 makes the descent 3% and as long as the climb needs, at the expense of the
 flat section after it. The CLI reports how far the tick moved, the overlay
-draws it where it ends up, and `profile.ticks[k].moved_px` records the shift.
+draws it where it ends up, and `profile.ticks[k].moved_m` records the shift.
 
 **Easing.** The grade does not jump at a tick. It changes at a steady rate
 along a parabolic vertical curve centred on the tick, as on a real road:
@@ -279,8 +288,7 @@ curves the elevation is that of the plain grades, so the lap still closes;
 on the curves a crest is rounded down and a dip filled in, by at most
 `change × length / 8` (0.45 m at the top of `climb_circuit`). A curve is never
 longer than either section beside it, so very short sections get a tighter
-curve (with a warning). Without `--length-m`, the radius is a quarter of the
-lap. For short, steep street climbs use a small radius, e.g. 100 m (an 8% kick
+curve (with a warning). For short, steep street climbs use a small radius, e.g. 100 m (an 8% kick
 then starts within 8 m); `--vertical-radius-m 0` gives abrupt changes.
 
 The program does not read handwriting: the LLM driving it reads the grades
@@ -294,18 +302,19 @@ place of `-3%`, without `--move-tick`); moving its end makes it 3%:
 ```
 circuit: drawn centerline -> edges outer, inner
   ...
-  scale 0.9102 m/px: 4000 m long, road 10.0 m wide
+  scale 0.9132 m/px: 4000 m long, road 10.0 m wide
+  rounded 3 corners so the inside edge turns no tighter than 6 m (the line moved up to 5.9 m)
   7 tick marks -> 7 sections in travel order (section 1 starts at the first tick after the start line):
-  tick 7 moved +358 m along the lap from where it is drawn, so the grades close the lap
+  tick 7 moved +368 m along the lap from where it is drawn, so the grades close the lap
      1     175 m   +1.50%  1-2%
-     2     202 m   +5.00%  5%
+     2     203 m   +5.00%  5%
      3     206 m   +7.00%  7%
-     4      96 m   +9.00%  9%
-     5     120 m   +3.00%  3%
-     6    1314 m   -3.00%  -3%
-     7    1887 m   +0.00%  flat
+     4      97 m   +9.00%  9%
+     5     121 m   +3.00%  3%
+     6    1318 m   -3.00%  -3%
+     7    1880 m   +0.00%  flat
   grade changes eased on a 1000 m vertical radius, over 15 to 60 m around each tick
-  elevation +0.0 to +39.0 m relative to the start line, total climb 39.0 m
+  elevation +0.0 to +39.1 m relative to the start line, total climb 39.1 m
 ```
 
 **3D view.** `drawcircuit-3d track.json` draws a circuit from its JSON in 3D:
@@ -348,7 +357,7 @@ the lap closed, until it passes `--clearance-m` (default 6 m) below the other
 road. That needs at least two open sections. Without `--under`, a crossing with
 less clearance is reported as a warning. For `tunnel_circuit`, section 4 runs
 through the tunnel under section 1; its descent steepens to −5.8% and the other
-descent eases to −3.8%.
+descent eases to −2.6%.
 
 ## How it works
 
@@ -383,12 +392,27 @@ descent eases to −3.8%.
    line is within `--tol` pixels, so a looser tolerance gives fewer control
    points. For a centerline, the edges are offset by half the road width along
    the normal and then fitted to within 0.5 px, so the road is as wide as asked.
-7. **Reference line.** For circuits, the true midline is traced as the zero
-   level of (distance to outer edge − distance to inner edge). It is smoothed
+7. **Corners.** At a real scale, wherever the centerline turns so tight that the
+   inside edge would turn at less than `--min-inside-radius-m` (default 6 m),
+   each point there moves a little towards the midpoint of its neighbours, over
+   and over (curve-shortening flow applied only where the line is too tight).
+   That rounds the inside of the corner: the line cuts across it and the turn
+   spreads over a longer arc, while the rest of the line stays as drawn. The
+   result is checked on the reference line and rounded further if fitting
+   tightened it. A hairpin whose legs are too close together for the radius
+   stops once the line has moved two road widths, with a warning to redraw it
+   wider. A circuit drawn with two edges is rebuilt around the midline between
+   them, as wide as drawn, with its corners rounded. Corners that keep turning
+   the same way (at a radius under about 100 m) through more than
+   `--max-corner-turn-deg` (default 200°) are reported as possible spirals.
+   `--min-inside-radius-m 0` keeps the corners as drawn.
+8. **Reference line.** For circuits drawn with two edges, the true midline is traced as the zero
+   level of (distance to outer edge − distance to inner edge); for a centerline,
+   it is the centerline itself. It is smoothed
    with a Gaussian of growing width (from 2 px, ×1.4 per step) until the
    condition above holds, then fitted. The widths are found by casting rays
    along the line's normals onto the edges.
-8. **Ticks.** For a centerline, ink more than half a stroke width from the
+9. **Ticks.** For a centerline, ink more than half a stroke width from the
    drawn line is grouped into pieces. A piece that touches the line, reaches
    1.5 stroke widths to 100 px from it, is straight and leaves the line at 45° or
    more is (half of) a tick. Spur pruning removes short ticks from the
@@ -402,11 +426,13 @@ descent eases to −3.8%.
 | `--mode auto\|edges\|centerline` | auto | what was drawn |
 | `--circuit` / `--segment` | detect | force a closed circuit / never close a stroke into a loop |
 | `--track-width PX` | 3.5% of the diagonal | road width for centerline drawings |
-| `--length-m M` | | real length of the lap in meters; sets `scale.m_per_px` |
+| `--length-m M` | | real length of the lap in meters; sets the scale (else the road is taken as 10 m wide) |
 | `--track-width-m M` | | road width in meters for centerline drawings (needs `--length-m`) |
 | `--grades LIST` | | grades of the sections between ticks, in travel order, e.g. `"1-2%,5%,descent,flat"` |
 | `--section-width-m K=W` | | road width W in meters for section K of a centerline circuit; repeatable |
 | `--width-taper X` | 5 | a change of road width is spread over X times its size |
+| `--min-inside-radius-m M` | 6 | at a real scale, round corners until the inside edge turns no tighter (0 = as drawn) |
+| `--max-corner-turn-deg D` | 200 | report corners that turn through more than this in one go |
 | `--move-tick K` | | move tick K along the lap until the grades, all given, close it |
 | `--route JSON` | | follow these waypoints along the ink instead of joining strokes |
 | `--under K` | | where the lap crosses itself, section K passes underneath |
