@@ -437,3 +437,26 @@ def test_second_criterium_example():
     assert np.linalg.norm(t.reference.line(0.0) - [282, 659]) < 4
     assert len(prof.ticks) == 3 and prof.sections[1].solved and prof.sections[1].grade < 0
     assert t.reference.length * t.m_per_px == pytest.approx(1500)
+
+
+def test_lollipop_example_drops_an_erased_mark():
+    """An erased arc touching the line looks like a tick; --drop-tick removes it."""
+    t = process(EXAMPLES / "lollipop_circuit.jpg",
+                Params(direction="cw", length_m=2500, track_width_m=8, drop_ticks=[(860, 778)],
+                       grades="flat,3%,flat,descent,flat,2%,flat,-1%,flat,4%,flat,descent".split(","))).track
+    prof = t.profile
+    assert len(prof.ticks) == 12
+    assert min(np.hypot(*(p - [860, 778])) for p in prof.points) > 50
+    assert prof.sections[3].solved and prof.sections[11].grade == pytest.approx(prof.sections[3].grade)
+    assert 7 < t.width["median"] * t.m_per_px < 9
+
+
+def test_drop_tick_far_from_any_tick_is_an_error():
+    from drawcircuit.pipeline import _drop_ticks
+    from drawcircuit.ticks import Tick
+
+    marks = [Tick(np.array([100.0, 100.0]), 10.0), Tick(np.array([300.0, 100.0]), 10.0)]
+    assert [m.point[0] for m in _drop_ticks(marks, [(290, 110)], near=40)] == [100.0]
+    with pytest.raises(TrackError, match="no tick within"):
+        _drop_ticks(marks, [(200, 100)], near=40)
+

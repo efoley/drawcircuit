@@ -39,8 +39,11 @@ circuits with a narrow road (`complex_circuit`, `flowing_circuit`, `street_circu
 `climb_circuit`, `switchback_circuit`, `wide_straight_circuit`,
 `tunnel_circuit`, `criterium_circuit` and `criterium2_circuit` are pencil photos
 of circuits drawn as one line, with ticks and the grades written beside them,
-processed as 4, 5, 2, 8, 1.8 and 1.5 km laps with a 10 m road. The two criteriums
-have their start line marked on the drawing (`--start`). `wide_straight_circuit` has a 20 m wide start straight and
+processed as 4, 5, 2, 8, 1.8 and 1.5 km laps with a 10 m road;
+`lollipop_circuit` is a 2.5 km lap with an 8 m road. The two criteriums
+have their start line marked on the drawing (`--start`). On `lollipop_circuit`
+an erased arc touching the line is taken for a tick and dropped with
+`--drop-tick`; sections left unlabeled are taken as flat. `wide_straight_circuit` has a 20 m wide start straight and
 street-style climbs that change grade within a few meters. `tunnel_circuit`
 passes under itself through a tunnel and is traced along waypoints
 (`tunnel_circuit.route.json`; see [Grades and scale](#grades-and-scale) and
@@ -61,6 +64,8 @@ uv run drawcircuit examples/criterium_circuit.jpg --direction ccw --start 440,73
     --track-width-m 10 --grades "2%,flat,descent,flat" --vertical-radius-m 3000   # gentle grade changes
 uv run drawcircuit examples/criterium2_circuit.jpg --direction ccw --start 282,659 --length-m 1500 \
     --track-width-m 10 --grades "1%,descent,flat" --vertical-radius-m 3000
+uv run drawcircuit examples/lollipop_circuit.jpg --direction cw --length-m 2500 --track-width-m 8 \
+    --drop-tick 860,778 --grades "flat,3%,flat,descent,flat,2%,flat,-1%,flat,4%,flat,descent"
 ```
 
 ## Driven by an LLM
@@ -269,7 +274,9 @@ split it into sections. A tick may cross the line or touch it from one side.
 Section 1 starts at the first tick after the start line, and the last section
 runs through the start line back to the first tick. The overlay numbers the
 sections, and the CLI lists them, so a first run without `--grades` shows the
-order to list the grades in.
+order to list the grades in. A mark taken for a tick that is not one, such as
+an erased line touching the road, is dropped with `--drop-tick X,Y` (the
+working-frame point of its bar in the overlay).
 
 **Grades.** `--grades` lists one grade per section, in travel order, separated
 by commas. A grade is rise over horizontal run in percent: `5%` or `5`, `-3%`,
@@ -439,6 +446,7 @@ descent eases to −2.6%.
 | `--width-taper X` | 5 | a change of road width is spread over X times its size |
 | `--min-inside-radius-m M` | 6 | at a real scale, round corners until the inside edge turns no tighter (0 = as drawn) |
 | `--max-corner-turn-deg D` | 200 | report corners that turn through more than this in one go |
+| `--drop-tick X,Y` | | drop the tick nearest this point (a mark that is not a tick); repeatable |
 | `--move-tick K` | | move tick K along the lap until the grades, all given, close it |
 | `--start X,Y` | | start/finish line marked on the drawing (working-frame px); default: middle of the longest straight |
 | `--route JSON` | | follow these waypoints along the ink instead of joining strokes |

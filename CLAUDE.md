@@ -28,8 +28,9 @@ Assume an LLM (you) runs drawcircuit for the user, with the photo in front of it
    `uv run drawcircuit photo.jpg --length-m L --track-width-m W`. Ask for the
    lap length and road width, or reuse what the user gave last time.
 2. Look at the overlay (`photo.overlay.png`): the line should be traced as
-   drawn, and every tick should have a black bar. Sections are numbered in
-   travel order from the start line. If the tracing goes wrong (a tunnel, a
+   drawn, and every tick should have a black bar. A bar where nothing was
+   meant as a tick (an erased mark, a stray line) goes with `--drop-tick X,Y`.
+   Sections are numbered in travel order from the start line. If the tracing goes wrong (a tunnel, a
    crossing, ticks at corners), give the route instead: read waypoints off
    `--debug-dir`'s `1_page.png` (a grid helps) into a `--route` file, with
    `"free"` legs through a tunnel, and check the traced line again.

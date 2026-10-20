@@ -51,6 +51,7 @@ class Params:
     max_corner_turn_deg: float = 200.0  # report corners that turn through more (spirals)
     assumed_width_m: float = 10.0       # without length_m, the road is taken to be this wide
     start: tuple[float, float] | None = None  # start/finish line marked on the drawing (frame px)
+    drop_ticks: list[tuple[float, float]] | None = None  # marks found as ticks that are not (frame px)
 
     def px(self, value: float | None, default: float) -> float:
         return float(value) if value is not None else default * self.working_size / REFERENCE_SIZE
@@ -137,6 +138,7 @@ def _finish(p: Params, lay: Layout, ink: preprocess.Ink, stroke_width: float, di
         line = lay.curves[0]
         marks = ticks.find(ink.mask, line.points, line.closed, stroke_width, max_reach=p.px(None, 100),
                            ignore=ignore)
+        marks = _drop_ticks(marks, p.drop_ticks or [], near=p.px(None, 40))
     debug.update(stroke_width=stroke_width, ticks=marks)
 
     fit = FitParams(tol=p.px(p.tol, 2.5), cp_spacing=p.px(p.cp_spacing, 60), smooth=p.smooth)
@@ -152,6 +154,18 @@ def _finish(p: Params, lay: Layout, ink: preprocess.Ink, stroke_width: float, di
     elif marks:
         t.warnings.append(f"ignored {len(marks)} tick mark(s): grades need a circuit with a reference line")
     return Result(t, frame_size, page.homography, page.paper_detected, debug)
+
+
+def _drop_ticks(marks: list[ticks.Tick], points, near: float) -> list[ticks.Tick]:
+    """``marks`` without the tick nearest each of ``points`` (an erased mark or a stray line
+    that was taken for a tick)."""
+    marks = list(marks)
+    for x, y in points:
+        d = [float(np.hypot(*(m.point - (x, y)))) for m in marks]
+        if not d or min(d) > near:
+            raise TrackError(f"no tick within {near:.0f} px of ({x:.0f}, {y:.0f}) to drop")
+        marks.pop(int(np.argmin(d)))
+    return marks
 
 
 def _scaled_build(lay: layout_mod.Layout, fit: FitParams, p: Params, diag: float,
