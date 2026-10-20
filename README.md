@@ -43,7 +43,12 @@ processed as 4, 5, 2, 8, 1.8 and 1.5 km laps with a 10 m road;
 `lollipop_circuit` is a 2.5 km lap with an 8 m road. The two criteriums
 have their start line marked on the drawing (`--start`). On `lollipop_circuit`
 an erased arc touching the line is taken for a tick and dropped with
-`--drop-tick`; sections left unlabeled are taken as flat. `wide_straight_circuit` has a 20 m wide start straight and
+`--drop-tick`; sections left unlabeled are taken as flat. `montreal_circuit` is
+the 12.2 km Grand Prix Cycliste de Montréal lap, redrawn from the race's route
+map as a clean line with ticks where the grade changes; the grades come from
+the map's elevation chart (heights matched at each tick) and its listed climbs
+(the 11% ramp of Polytechnique, 4% up Avenue du Parc to the finish). Avenue du
+Parc is drawn as two carriageways joined by the U-turn at its bottom. `wide_straight_circuit` has a 20 m wide start straight and
 street-style climbs that change grade within a few meters. `tunnel_circuit`
 passes under itself through a tunnel and is traced along waypoints
 (`tunnel_circuit.route.json`; see [Grades and scale](#grades-and-scale) and
@@ -66,6 +71,9 @@ uv run drawcircuit examples/criterium2_circuit.jpg --direction ccw --start 282,6
     --track-width-m 10 --grades "1%,descent,flat" --vertical-radius-m 3000
 uv run drawcircuit examples/lollipop_circuit.jpg --direction cw --length-m 2500 --track-width-m 8 \
     --drop-tick 860,778 --grades "flat,3%,flat,descent,flat,2%,flat,-1%,flat,4%,flat,descent"
+uv run drawcircuit examples/montreal_circuit.png --no-paper --direction cw --start 1493,731 \
+    --length-m 12200 --track-width-m 10 --grades "10.9%,5.3%,8.5%,4%,descent,-7%,-1.4%,-2.6%,0.4%,\
+5.5%,11%,2.9%,-3.4%,-8.8%,-4.2%,-0.4%,1.6%,-2.1%,3.9%,-0.2%,-2.1%,-12.1%,-5.1%,0.2%,-3.9%,4%,0.3%"
 ```
 
 ## Driven by an LLM

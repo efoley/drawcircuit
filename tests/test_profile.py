@@ -460,3 +460,17 @@ def test_drop_tick_far_from_any_tick_is_an_error():
     with pytest.raises(TrackError, match="no tick within"):
         _drop_ticks(marks, [(200, 100)], near=40)
 
+
+
+def test_montreal_example():
+    """The Grand Prix Cycliste de Montréal lap, redrawn from its route map: 12.2 km, the top of
+    Camillien-Houde 133 m above the start (212 m against 79 m on the map's chart)."""
+    grades = ("10.9%,5.3%,8.5%,4%,descent,-7%,-1.4%,-2.6%,0.4%,5.5%,11%,2.9%,-3.4%,-8.8%,-4.2%,-0.4%,1.6%,"
+              "-2.1%,3.9%,-0.2%,-2.1%,-12.1%,-5.1%,0.2%,-3.9%,4%,0.3%").split(",")
+    t = process(EXAMPLES / "montreal_circuit.png",
+                Params(find_paper=False, direction="cw", start=(1493, 731), length_m=12200,
+                       track_width_m=10, grades=grades)).track
+    prof, m = t.profile, t.m_per_px
+    assert len(prof.ticks) == 27 and not prof.crossings
+    assert np.linalg.norm(t.reference.line(0.0) - [1493, 731]) < 4
+    assert 130 < prof.z.max() * m < 137 and prof.sections[4].solved and -4.5 < 100 * prof.sections[4].grade < -3.5
