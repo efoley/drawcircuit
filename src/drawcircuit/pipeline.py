@@ -53,6 +53,7 @@ class Params:
     start: tuple[float, float] | None = None  # start/finish line marked on the drawing (frame px)
     drop_ticks: list[tuple[float, float]] | None = None  # marks found as ticks that are not (frame px)
     add_ticks: list[tuple[float, float]] | None = None   # ticks where none is drawn (frame px)
+    section_lengths_m: list[float] | None = None  # sections of these lengths from the start, not the drawn ticks
 
     def px(self, value: float | None, default: float) -> float:
         return float(value) if value is not None else default * self.working_size / REFERENCE_SIZE
@@ -134,6 +135,8 @@ def _finish(p: Params, lay: Layout, ink: preprocess.Ink, stroke_width: float, di
             frame_size: tuple[int, int], page: preprocess.Page, debug: dict,
             ignore: np.ndarray | None = None) -> Result:
     """Fit the track to the chosen line(s), with ticks, scale and grades."""
+    if p.section_lengths_m is not None and (p.drop_ticks or p.add_ticks or p.section_widths_m):
+        raise ValueError("sections given by length replace the drawn ticks: drop, add or widen none with them")
     marks = []
     if lay.source == CENTERLINE:
         line = lay.curves[0]
@@ -145,6 +148,9 @@ def _finish(p: Params, lay: Layout, ink: preprocess.Ink, stroke_width: float, di
 
     fit = FitParams(tol=p.px(p.tol, 2.5), cp_spacing=p.px(p.cp_spacing, 60), smooth=p.smooth)
     t = _scaled_build(lay, fit, p, diag, marks)
+    if p.section_lengths_m is not None:
+        marks = _ticks_at(t, p.section_lengths_m)
+        debug["ticks"] = marks
     if t.reference is not None and (marks or p.grades is not None):
         radius = (p.vertical_radius_m if p.vertical_radius_m is not None
                   else profile.VERTICAL_RADIUS_M) / t.m_per_px
@@ -180,6 +186,18 @@ def _add_ticks(line: np.ndarray, points, near: float) -> list[ticks.Tick]:
             raise TrackError(f"no line within {near:.0f} px of ({x:.0f}, {y:.0f}) to add a tick to")
         out.append(ticks.Tick(np.asarray(line[int(np.argmin(d))], dtype=float), 0.0))
     return out
+
+
+def _ticks_at(t: Track, lengths_m: list[float]) -> list[ticks.Tick]:
+    """Ticks that split the lap into sections of these lengths, meters in travel order from
+    the start line (as a map's legend gives them), in place of the drawn ones."""
+    if t.reference is None or t.scale_from != "length":
+        raise TrackError("sections given by length need a circuit and its lap length")
+    total, given = t.reference.length * t.m_per_px, float(sum(lengths_m))
+    if abs(given - total) > 0.01 * total:
+        raise TrackError(f"the section lengths add up to {given:.0f} m, not the lap's {total:.0f} m")
+    s = np.concatenate([[0.0], np.cumsum(lengths_m[:-1])]) * t.reference.length / given
+    return [ticks.Tick(point, 0.0) for point in t.reference.line(t.reference.u_at(s))]
 
 
 def _scaled_build(lay: layout_mod.Layout, fit: FitParams, p: Params, diag: float,

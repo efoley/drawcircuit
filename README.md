@@ -52,7 +52,14 @@ are given grades, and the other unlabeled sections are open (`?`). For a
 classics feel its climbs were steepened at the top into 12-15% walls, two of
 them split off with `--add-tick`. A label touching its line sends the
 automatic trace into a loop, so it is traced along waypoints
-(`road_race_circuit.route.json`). `montreal_circuit` is
+(`road_race_circuit.route.json`). `ardennes_loop` is a clean digital map of
+a fictional 25 km circuit whose legend lists twelve sections with their lengths
+and the four climbs' grades; its drawn ticks only roughly agree with the
+legend, so the sections are placed by the legend's lengths
+(`--section-lengths-m`), each climb split into pitches of different grades that
+keep the legend's average, each descent into pitches with one open, and the
+flat roads into gentle ups and downs of about 1%; `--max-gap 20` keeps the
+trace from joining the line to a label beside it. `montreal_circuit` is
 the 12.2 km Grand Prix Cycliste de Montréal lap, redrawn from the race's route
 map as a clean line with ticks where the grade changes; the grades come from
 the map's elevation chart (heights matched at each tick) and its listed climbs
@@ -87,6 +94,12 @@ uv run drawcircuit examples/road_race_circuit.jpg --route examples/road_race_cir
     --start 101,598 --drop-tick 298,1185 --drop-tick 826,1176 --add-tick 928,688 --add-tick 257,932 \
     --length-m 25000 --track-width-m 8 --grades "8%,6%,14%,?,-8%,?,4%,2%,?,-3%,-5%,?,4%,6%,15%,?,8%,2%,\
 -10%,-4%,-2%,flat,1%,2%,-3%,-1%,-4%,flat,12%,-3%,?,2%,-1.5%"
+uv run drawcircuit examples/ardennes_loop.png --no-paper --max-gap 20 --direction cw --start 801,942 \
+    --length-m 25000 --track-width-m 8 \
+    --section-lengths-m 800,600,1000,400,500,300,400,500,700,1000,1000,500,500,500,500,500,500,300,300,300,\
+600,1000,1000,1000,1000,800,700,400,400,400,600,800,400,1000,800,200,200,200,400,600,400,600,400 \
+    --grades "0.5%,-1%,1%,6%,11%,7%,11%,-8%,-3%,descent,-6%,1.5%,-1%,1%,-1.5%,1%,-1%,9%,15%,12%,-9%,descent,\
+-2%,-1%,0.5%,1%,-0.5%,7%,11%,6%,9.5%,-5%,-10%,descent,-3%,11%,17%,14%,-8%,descent,-2%,-0.5%,1%"
 uv run drawcircuit examples/montreal_circuit.png --no-paper --direction cw --start 1493,731 \
     --length-m 12200 --track-width-m 10 --grades "10.9%,5.3%,8.5%,4%,descent,-7%,-1.4%,-2.6%,0.4%,\
 5.5%,11%,2.9%,-3.4%,-8.8%,-4.2%,-0.4%,1.6%,-2.1%,3.9%,-0.2%,-2.1%,-12.1%,-5.1%,0.2%,-3.9%,4%,0.3%"
@@ -302,7 +315,9 @@ order to list the grades in. A mark taken for a tick that is not one, such as
 an erased line touching the road, is dropped with `--drop-tick X,Y` (the
 working-frame point of its bar in the overlay). `--add-tick X,Y` adds a tick
 where none is drawn, on the line nearest that point, to split a section, e.g.
-for a steeper pitch inside it.
+for a steeper pitch inside it. On a map whose legend gives each section's
+length, `--section-lengths-m L1,L2,...` places the sections by those lengths
+from the start line instead of at the drawn ticks.
 
 **Grades.** `--grades` lists one grade per section, in travel order, separated
 by commas. A grade is rise over horizontal run in percent: `5%` or `5`, `-3%`,
@@ -474,6 +489,7 @@ descent eases to −2.6%.
 | `--max-corner-turn-deg D` | 200 | report corners that turn through more than this in one go |
 | `--drop-tick X,Y` | | drop the tick nearest this point (a mark that is not a tick); repeatable |
 | `--add-tick X,Y` | | add a tick on the line nearest this point, to split a section; repeatable |
+| `--section-lengths-m L1,L2,...` | | sections of these lengths from the start line instead of the drawn ticks (a map's legend); they add up to `--length-m` |
 | `--move-tick K` | | move tick K along the lap until the grades, all given, close it |
 | `--start X,Y` | | start/finish line marked on the drawing (working-frame px); default: middle of the longest straight |
 | `--route JSON` | | follow these waypoints along the ink instead of joining strokes |

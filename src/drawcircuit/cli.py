@@ -60,6 +60,10 @@ def _parser() -> argparse.ArgumentParser:
                     help="a tick where none is drawn, to split a section (e.g. for a steeper pitch inside "
                          "it): on the line nearest this point, in working-frame px as in the overlay; "
                          "repeatable")
+    ap.add_argument("--section-lengths-m", metavar="L1,L2,...",
+                    help="lengths in meters of the sections, comma-separated in travel order from the start "
+                         "line, instead of the drawn ticks (e.g. from a map's legend); they must add up to "
+                         "--length-m")
     ap.add_argument("--route", type=Path, metavar="JSON",
                     help="follow these waypoints (working-frame px, in travel order) along the ink instead "
                          "of joining strokes automatically: {\"closed\": true, \"points\": [[x, y], "
@@ -104,7 +108,7 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     if args.track_width is not None and args.track_width_m is not None:
         ap.error("give the road width in px (--track-width) or in meters (--track-width-m), not both")
-    for name in ("track_width_m", "vertical_radius_m", "section_width_m"):
+    for name in ("track_width_m", "vertical_radius_m", "section_width_m", "section_lengths_m"):
         if getattr(args, name) not in (None, []) and args.length_m is None:
             ap.error(f"--{name.replace('_', '-')} needs --length-m to set the scale")
     if args.section_width_m and args.track_width_m is None:
@@ -124,6 +128,7 @@ def main(argv: list[str] | None = None) -> int:
         route=route.load(args.route) if args.route else None, under=args.under,
         clearance_m=args.clearance_m, min_inside_radius_m=args.min_inside_radius_m, start=args.start,
         drop_ticks=args.drop_tick or None, add_ticks=args.add_tick or None,
+        section_lengths_m=[float(v) for v in args.section_lengths_m.split(",")] if args.section_lengths_m else None,
         max_corner_turn_deg=args.max_corner_turn_deg,
     )
     try:

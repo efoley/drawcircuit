@@ -489,6 +489,34 @@ def test_road_race_example():
     assert prof.sections[30].grade == pytest.approx(prof.sections[3].grade)
 
 
+ARDENNES = dict(find_paper=False, max_gap=20, direction="cw", start=(801, 942), length_m=25000,
+                track_width_m=8)
+ARDENNES_LEGEND = [800, 600, 1000, 400, 500, 300, 400, 500, 700, 1000, 1000, 500, 500, 500, 500, 500, 500, 300,
+                   300, 300, 600, 1000, 1000, 1000, 1000, 800, 700, 400, 400, 400, 600, 800, 400, 1000, 800, 200,
+                   200, 200, 400, 600, 400, 600, 400]  # the legend's sections split into pitches
+
+
+def test_ardennes_example_takes_the_sections_from_the_legend():
+    """A map whose drawn ticks only roughly agree with its legend: the sections are placed by
+    the legend's lengths from the start line."""
+    t = process(EXAMPLES / "ardennes_loop.png",
+                Params(**ARDENNES, section_lengths_m=ARDENNES_LEGEND,
+                       grades=("0.5%,-1%,1%,6%,11%,7%,11%,-8%,-3%,descent,-6%,1.5%,-1%,1%,-1.5%,1%,-1%,9%,15%,"
+                               "12%,-9%,descent,-2%,-1%,0.5%,1%,-0.5%,7%,11%,6%,9.5%,-5%,-10%,descent,-3%,11%,"
+                               "17%,14%,-8%,descent,-2%,-0.5%,1%").split(","))
+                ).track
+    prof, m = t.profile, t.m_per_px
+    assert [round(sec.length * m, -1) for sec in prof.sections] == pytest.approx(ARDENNES_LEGEND, abs=15)
+    assert np.linalg.norm(t.reference.line(0.0) - [801, 942]) < 4 and not prof.crossings
+    descents = [sec.grade for sec in prof.sections if sec.solved]
+    assert len(descents) == 4 and -4.6 < 100 * descents[0] < -4.2
+
+
+def test_section_lengths_must_add_up_to_the_lap():
+    with pytest.raises(TrackError, match="add up to 24600 m"):
+        process(EXAMPLES / "ardennes_loop.png", Params(**ARDENNES, section_lengths_m=ARDENNES_LEGEND[:-1]))
+
+
 def test_add_tick_goes_on_the_line():
     from drawcircuit.pipeline import _add_ticks
 

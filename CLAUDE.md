@@ -31,6 +31,8 @@ Assume an LLM (you) runs drawcircuit for the user, with the photo in front of it
    drawn, and every tick should have a black bar. A bar where nothing was
    meant as a tick (an erased mark, a stray line) goes with `--drop-tick X,Y`;
    a section the user wants split (a steeper pitch inside it) gets `--add-tick X,Y`.
+   A map whose legend gives the sections' lengths can place them by those
+   (`--section-lengths-m`) instead of at its drawn ticks.
    Sections are numbered in travel order from the start line. If the tracing goes wrong (a tunnel, a
    crossing, ticks at corners), give the route instead: read waypoints off
    `--debug-dir`'s `1_page.png` (a grid helps) into a `--route` file, with
