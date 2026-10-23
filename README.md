@@ -40,10 +40,19 @@ circuits with a narrow road (`complex_circuit`, `flowing_circuit`, `street_circu
 `tunnel_circuit`, `criterium_circuit` and `criterium2_circuit` are pencil photos
 of circuits drawn as one line, with ticks and the grades written beside them,
 processed as 4, 5, 2, 8, 1.8 and 1.5 km laps with a 10 m road;
-`lollipop_circuit` is a 2.5 km lap with an 8 m road. The two criteriums
-have their start line marked on the drawing (`--start`). On `lollipop_circuit`
-an erased arc touching the line is taken for a tick and dropped with
-`--drop-tick`; sections left unlabeled are taken as flat. `montreal_circuit` is
+`lollipop_circuit`, `country_loop` and `road_race_circuit` are 2.5, 16 and
+25 km laps with an 8 m road. The two criteriums, `country_loop` and
+`road_race_circuit` have their start line marked on the drawing (`--start`). On
+`lollipop_circuit` an erased arc touching the line, and on `country_loop` and
+`road_race_circuit` the minus signs of grades written against it, are taken for
+ticks and dropped with `--drop-tick`; sections left unlabeled are taken as flat.
+On `road_race_circuit` the marked climbs outweigh the marked descents by 170 m,
+far too much for its one descent: the descent and three unlabeled sections
+are given grades, and the other unlabeled sections are open (`?`). For a
+classics feel its climbs were steepened at the top into 12-15% walls, two of
+them split off with `--add-tick`. A label touching its line sends the
+automatic trace into a loop, so it is traced along waypoints
+(`road_race_circuit.route.json`). `montreal_circuit` is
 the 12.2 km Grand Prix Cycliste de Montréal lap, redrawn from the race's route
 map as a clean line with ticks where the grade changes; the grades come from
 the map's elevation chart (heights matched at each tick) and its listed climbs
@@ -71,6 +80,13 @@ uv run drawcircuit examples/criterium2_circuit.jpg --direction ccw --start 282,6
     --track-width-m 10 --grades "1%,descent,flat" --vertical-radius-m 3000
 uv run drawcircuit examples/lollipop_circuit.jpg --direction cw --length-m 2500 --track-width-m 8 \
     --drop-tick 860,778 --grades "flat,3%,flat,descent,flat,2%,flat,-1%,flat,4%,flat,descent"
+uv run drawcircuit examples/country_loop.jpg --direction cw --start 567,119 --drop-tick 838,1391 \
+    --length-m 16000 --track-width-m 8 \
+    --grades "9%,flat,6%,flat,5%,flat,-1%,flat,10%,flat,8%,flat,-6%,flat,-8%,flat,-2%,flat,-3%,flat,descent,flat"
+uv run drawcircuit examples/road_race_circuit.jpg --route examples/road_race_circuit.route.json --direction cw \
+    --start 101,598 --drop-tick 298,1185 --drop-tick 826,1176 --add-tick 928,688 --add-tick 257,932 \
+    --length-m 25000 --track-width-m 8 --grades "8%,6%,14%,?,-8%,?,4%,2%,?,-3%,-5%,?,4%,6%,15%,?,8%,2%,\
+-10%,-4%,-2%,flat,1%,2%,-3%,-1%,-4%,flat,12%,-3%,?,2%,-1.5%"
 uv run drawcircuit examples/montreal_circuit.png --no-paper --direction cw --start 1493,731 \
     --length-m 12200 --track-width-m 10 --grades "10.9%,5.3%,8.5%,4%,descent,-7%,-1.4%,-2.6%,0.4%,\
 5.5%,11%,2.9%,-3.4%,-8.8%,-4.2%,-0.4%,1.6%,-2.1%,3.9%,-0.2%,-2.1%,-12.1%,-5.1%,0.2%,-3.9%,4%,0.3%"
@@ -284,7 +300,9 @@ runs through the start line back to the first tick. The overlay numbers the
 sections, and the CLI lists them, so a first run without `--grades` shows the
 order to list the grades in. A mark taken for a tick that is not one, such as
 an erased line touching the road, is dropped with `--drop-tick X,Y` (the
-working-frame point of its bar in the overlay).
+working-frame point of its bar in the overlay). `--add-tick X,Y` adds a tick
+where none is drawn, on the line nearest that point, to split a section, e.g.
+for a steeper pitch inside it.
 
 **Grades.** `--grades` lists one grade per section, in travel order, separated
 by commas. A grade is rise over horizontal run in percent: `5%` or `5`, `-3%`,
@@ -455,6 +473,7 @@ descent eases to −2.6%.
 | `--min-inside-radius-m M` | 6 | at a real scale, round corners until the inside edge turns no tighter (0 = as drawn) |
 | `--max-corner-turn-deg D` | 200 | report corners that turn through more than this in one go |
 | `--drop-tick X,Y` | | drop the tick nearest this point (a mark that is not a tick); repeatable |
+| `--add-tick X,Y` | | add a tick on the line nearest this point, to split a section; repeatable |
 | `--move-tick K` | | move tick K along the lap until the grades, all given, close it |
 | `--start X,Y` | | start/finish line marked on the drawing (working-frame px); default: middle of the longest straight |
 | `--route JSON` | | follow these waypoints along the ink instead of joining strokes |

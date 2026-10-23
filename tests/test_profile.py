@@ -451,6 +451,53 @@ def test_lollipop_example_drops_an_erased_mark():
     assert 7 < t.width["median"] * t.m_per_px < 9
 
 
+def test_country_loop_example_drops_a_minus_sign():
+    """The minus sign of a "-6%" written against the line looks like a tick; the start line is
+    the box marked on the drawing."""
+    t = process(EXAMPLES / "country_loop.jpg",
+                Params(direction="cw", start=(567, 119), drop_ticks=[(838, 1391)], length_m=16000,
+                       track_width_m=8, grades=("9%,flat,6%,flat,5%,flat,-1%,flat,10%,flat,8%,flat,-6%,flat,"
+                                                "-8%,flat,-2%,flat,-3%,flat,descent,flat").split(","))).track
+    prof = t.profile
+    assert len(prof.ticks) == 22
+    assert min(np.hypot(*(p - [838, 1391])) for p in prof.points) > 15
+    assert np.linalg.norm(t.reference.line(0.0) - [567, 119]) < 4
+    assert prof.sections[20].solved and prof.sections[20].grade < 0
+    assert 78 < prof.z.max() * t.m_per_px < 85
+
+
+def test_road_race_example():
+    """25 km along waypoints (a label touching the line sent the automatic trace into a loop),
+    with the unlabeled sections open so the climbs can be undone, and two walls split off
+    with added ticks."""
+    from drawcircuit import route
+
+    t = process(EXAMPLES / "road_race_circuit.jpg",
+                Params(route=route.load(EXAMPLES / "road_race_circuit.route.json"), direction="cw",
+                       start=(101, 598), drop_ticks=[(298, 1185), (826, 1176)],
+                       add_ticks=[(928, 688), (257, 932)], length_m=25000, track_width_m=8,
+                       grades=("8%,6%,14%,?,-8%,?,4%,2%,?,-3%,-5%,?,4%,6%,15%,?,8%,2%,-10%,-4%,-2%,flat,1%,"
+                               "2%,-3%,-1%,-4%,flat,12%,-3%,?,2%,-1.5%").split(","))).track
+    prof = t.profile
+    m = t.m_per_px
+    assert len(prof.ticks) == 33 and not prof.crossings
+    assert prof.sections[14].length * m == pytest.approx(200, abs=15)  # the 15% wall
+    assert prof.sections[28].length * m == pytest.approx(400, abs=15)  # the 12% one
+    assert not any("turns through" in w for w in t.warnings)
+    assert np.linalg.norm(t.reference.line(0.0) - [101, 598]) < 4
+    assert prof.sections[3].solved and -3.4 < 100 * prof.sections[3].grade < -2.7
+    assert prof.sections[30].grade == pytest.approx(prof.sections[3].grade)
+
+
+def test_add_tick_goes_on_the_line():
+    from drawcircuit.pipeline import _add_ticks
+
+    line = np.column_stack([np.arange(0.0, 200.0), np.full(200, 50.0)])
+    assert _add_ticks(line, [(120.4, 60)], near=40)[0].point.tolist() == [120.0, 50.0]
+    with pytest.raises(TrackError, match="no line within"):
+        _add_ticks(line, [(100, 120)], near=40)
+
+
 def test_drop_tick_far_from_any_tick_is_an_error():
     from drawcircuit.pipeline import _drop_ticks
     from drawcircuit.ticks import Tick

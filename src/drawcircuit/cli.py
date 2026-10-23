@@ -56,6 +56,10 @@ def _parser() -> argparse.ArgumentParser:
     ap.add_argument("--drop-tick", type=_point, action="append", default=[], metavar="X,Y",
                     help="a mark taken for a tick that is not one (an erased mark, a stray line): drop the "
                          "tick nearest this point, in working-frame px as in the overlay; repeatable")
+    ap.add_argument("--add-tick", type=_point, action="append", default=[], metavar="X,Y",
+                    help="a tick where none is drawn, to split a section (e.g. for a steeper pitch inside "
+                         "it): on the line nearest this point, in working-frame px as in the overlay; "
+                         "repeatable")
     ap.add_argument("--route", type=Path, metavar="JSON",
                     help="follow these waypoints (working-frame px, in travel order) along the ink instead "
                          "of joining strokes automatically: {\"closed\": true, \"points\": [[x, y], "
@@ -119,7 +123,8 @@ def main(argv: list[str] | None = None) -> int:
         move_tick=args.move_tick, section_widths_m=section_widths or None, width_taper=args.width_taper,
         route=route.load(args.route) if args.route else None, under=args.under,
         clearance_m=args.clearance_m, min_inside_radius_m=args.min_inside_radius_m, start=args.start,
-        drop_ticks=args.drop_tick or None, max_corner_turn_deg=args.max_corner_turn_deg,
+        drop_ticks=args.drop_tick or None, add_ticks=args.add_tick or None,
+        max_corner_turn_deg=args.max_corner_turn_deg,
     )
     try:
         result = process(args.image, params)

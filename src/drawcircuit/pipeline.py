@@ -52,6 +52,7 @@ class Params:
     assumed_width_m: float = 10.0       # without length_m, the road is taken to be this wide
     start: tuple[float, float] | None = None  # start/finish line marked on the drawing (frame px)
     drop_ticks: list[tuple[float, float]] | None = None  # marks found as ticks that are not (frame px)
+    add_ticks: list[tuple[float, float]] | None = None   # ticks where none is drawn (frame px)
 
     def px(self, value: float | None, default: float) -> float:
         return float(value) if value is not None else default * self.working_size / REFERENCE_SIZE
@@ -139,6 +140,7 @@ def _finish(p: Params, lay: Layout, ink: preprocess.Ink, stroke_width: float, di
         marks = ticks.find(ink.mask, line.points, line.closed, stroke_width, max_reach=p.px(None, 100),
                            ignore=ignore)
         marks = _drop_ticks(marks, p.drop_ticks or [], near=p.px(None, 40))
+        marks += _add_ticks(line.points, p.add_ticks or [], near=p.px(None, 40))
     debug.update(stroke_width=stroke_width, ticks=marks)
 
     fit = FitParams(tol=p.px(p.tol, 2.5), cp_spacing=p.px(p.cp_spacing, 60), smooth=p.smooth)
@@ -166,6 +168,18 @@ def _drop_ticks(marks: list[ticks.Tick], points, near: float) -> list[ticks.Tick
             raise TrackError(f"no tick within {near:.0f} px of ({x:.0f}, {y:.0f}) to drop")
         marks.pop(int(np.argmin(d)))
     return marks
+
+
+def _add_ticks(line: np.ndarray, points, near: float) -> list[ticks.Tick]:
+    """Ticks where none is drawn, at the points of ``line`` nearest ``points`` (to split a
+    section in two, e.g. for a steeper pitch inside it)."""
+    out = []
+    for x, y in points:
+        d = np.hypot(*(line - (x, y)).T)
+        if d.min() > near:
+            raise TrackError(f"no line within {near:.0f} px of ({x:.0f}, {y:.0f}) to add a tick to")
+        out.append(ticks.Tick(np.asarray(line[int(np.argmin(d))], dtype=float), 0.0))
+    return out
 
 
 def _scaled_build(lay: layout_mod.Layout, fit: FitParams, p: Params, diag: float,
