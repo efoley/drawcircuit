@@ -59,12 +59,27 @@ legend, so the sections are placed by the legend's lengths
 (`--section-lengths-m`), each climb split into pitches of different grades that
 keep the legend's average, each descent into pitches with one open, and the
 flat roads into gentle ups and downs of about 1%; `--max-gap 20` keeps the
-trace from joining the line to a label beside it. `montreal_circuit` is
+trace from joining the line to a label beside it. `giro_delle_colline` is a
+map of the same kind, a fictional 25 km Italian classics lap whose drawn ticks
+fit its legend even less; its sections are placed by the legend's lengths too,
+with the 1.2 km the legend leaves out made a run-in to the Muro del Borgo, the
+climbs and descents split into pitches the same way, the lakeside road nearly
+flat, the valley road within 1% and the rolling ridge within 3%. `montreal_circuit` is
 the 12.2 km Grand Prix Cycliste de Montréal lap, redrawn from the race's route
 map as a clean line with ticks where the grade changes; the grades come from
 the map's elevation chart (heights matched at each tick) and its listed climbs
 (the 11% ramp of Polytechnique, 4% up Avenue du Parc to the finish). Avenue du
-Parc is drawn as two carriageways joined by the U-turn at its bottom. `wide_straight_circuit` has a 20 m wide start straight and
+Parc is drawn as two carriageways joined by the U-turn at its bottom.
+`polder_loop`, `rolling_downs_loop` and `col_loop` are long, untechnical road-race
+laps for racer's tactics races: 45, 42 and 48 km with 10, 9 and 8 m roads, one
+flat, one rolling with two short climbs (1.6 km at 5%, 1.2 km at 4.5%) and one
+with a 4.5 km climb at 6% about two-thirds of the way round. They are drawn
+as smooth lines without ticks or labels, so their sections are placed by length
+from the start line, and no corner is tighter than about 115 m.
+`sprint_boulevard`, `sprint_seafront` and `sprint_drag_finish`, drawn the same
+way, are flat 3.5, 5 and 6.5 km laps for bunch sprints, with 12, 10 and 10 m
+roads, sweeping bends and one or two hard corners each, and a run-in of 675 m,
+1.5 km and 1.4 km to the line; the last drags up it at 0.5% to 1.8%. `wide_straight_circuit` has a 20 m wide start straight and
 street-style climbs that change grade within a few meters. `tunnel_circuit`
 passes under itself through a tunnel and is traced along waypoints
 (`tunnel_circuit.route.json`; see [Grades and scale](#grades-and-scale) and
@@ -100,9 +115,39 @@ uv run drawcircuit examples/ardennes_loop.png --no-paper --max-gap 20 --directio
 600,1000,1000,1000,1000,800,700,400,400,400,600,800,400,1000,800,200,200,200,400,600,400,600,400 \
     --grades "0.5%,-1%,1%,6%,11%,7%,11%,-8%,-3%,descent,-6%,1.5%,-1%,1%,-1.5%,1%,-1%,9%,15%,12%,-9%,descent,\
 -2%,-1%,0.5%,1%,-0.5%,7%,11%,6%,9.5%,-5%,-10%,descent,-3%,11%,17%,14%,-8%,descent,-2%,-0.5%,1%"
+uv run drawcircuit examples/giro_delle_colline.png --no-paper --direction cw --start 932,862 \
+    --length-m 25000 --track-width-m 8 \
+    --section-lengths-m 1000,900,1100,600,800,500,700,600,500,800,300,250,300,250,300,300,300,800,700,600,\
+500,600,700,500,400,400,300,400,300,300,300,400,500,400,400,500,600,800,700,500,400,400,400,400,200,200,200,\
+200,500,500,500 \
+    --grades "0.2%,-0.3%,0.2%,5%,7%,9%,6%,8.5%,5.5%,8%,2.5%,-3%,3%,-2%,2%,-3%,1.5%,-2%,-5%,-8%,-10%,-7%,\
+-9.5%,-6%,descent,0.5%,-0.5%,1%,-0.5%,0.8%,-1%,8%,11%,9%,12.5%,9.5%,-5%,-7.5%,-8%,-6.5%,descent,0.5%,-1%,1%,\
+9%,15%,13%,11%,-6%,-9%,descent"
 uv run drawcircuit examples/montreal_circuit.png --no-paper --direction cw --start 1493,731 \
     --length-m 12200 --track-width-m 10 --grades "10.9%,5.3%,8.5%,4%,descent,-7%,-1.4%,-2.6%,0.4%,\
 5.5%,11%,2.9%,-3.4%,-8.8%,-4.2%,-0.4%,1.6%,-2.1%,3.9%,-0.2%,-2.1%,-12.1%,-5.1%,0.2%,-3.9%,4%,0.3%"
+uv run drawcircuit examples/polder_loop.png --no-paper --direction ccw --start 534,921 \
+    --length-m 45000 --track-width-m 10 --section-lengths-m 4000,5000,4500,5000,4000,5500,4000,4500,4500,4000 \
+    --grades "0.2%,-0.3%,0.4%,flat,-0.5%,0.3%,-0.2%,0.5%,descent,flat"
+uv run drawcircuit examples/rolling_downs_loop.png --no-paper --direction cw --start 678,169 \
+    --length-m 42000 --track-width-m 9 --section-lengths-m 2000,2000,1500,2000,2000,1500,500,600,500,\
+1500,1500,2000,2000,2500,2000,2000,1500,1500,400,500,300,2000,2000,2500,2000,1700,1500 \
+    --grades "0.3%,1.5%,-1%,-2%,1%,2%,4%,6%,5%,-3.5%,-2%,0.5%,-1%,1.5%,-1.5%,1%,-1%,1.5%,3.5%,5.5%,4%,\
+-3%,-1.5%,1%,descent,-0.5%,flat"
+uv run drawcircuit examples/col_loop.png --no-paper --direction ccw --start 562,876 \
+    --length-m 48000 --track-width-m 8 --section-lengths-m 3000,3000,2500,3000,2500,3000,2500,3000,2500,\
+2500,2000,800,1000,900,1000,800,1000,2000,2000,1500,2500,2500,2500 \
+    --grades "flat,0.8%,-0.5%,1.5%,-1.5%,1%,-1%,2%,-2.5%,0.5%,1.5%,5%,6.5%,5.5%,7%,6%,-2%,-5.5%,-6%,-4%,\
+descent,-0.5%,flat"
+uv run drawcircuit examples/sprint_boulevard.png --no-paper --direction ccw --start 1020,841 \
+    --length-m 3500 --track-width-m 12 --section-lengths-m 500,400,700,800,500,600 \
+    --grades "flat,0.6%,-0.3%,0.4%,descent,flat"
+uv run drawcircuit examples/sprint_seafront.png --no-paper --direction ccw --start 1250,734 \
+    --length-m 5000 --track-width-m 10 --section-lengths-m 350,450,700,800,900,1800 \
+    --grades "flat,0.8%,0.5%,-0.4%,descent,flat"
+uv run drawcircuit examples/sprint_drag_finish.png --no-paper --direction cw --start 1232,125 \
+    --length-m 6500 --track-width-m 10 --section-lengths-m 300,1100,1000,1200,900,600,600,500,300 \
+    --grades "flat,-0.8%,-0.3%,0.4%,descent,flat,0.5%,1.2%,1.8%"
 ```
 
 ## Driven by an LLM

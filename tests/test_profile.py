@@ -517,6 +517,81 @@ def test_section_lengths_must_add_up_to_the_lap():
         process(EXAMPLES / "ardennes_loop.png", Params(**ARDENNES, section_lengths_m=ARDENNES_LEGEND[:-1]))
 
 
+LONG_LOOPS = {  # name: (direction, start, lap m, road m, section lengths, grades, top m)
+    "polder_loop": ("ccw", (534, 921), 45000, 10, "4000,5000,4500,5000,4000,5500,4000,4500,4500,4000",
+                    "0.2%,-0.3%,0.4%,flat,-0.5%,0.3%,-0.2%,0.5%,descent,flat", 22),
+    "rolling_downs_loop": ("cw", (678, 169), 42000, 9,
+                           "2000,2000,1500,2000,2000,1500,500,600,500,1500,1500,2000,2000,2500,2000,2000,1500,"
+                           "1500,400,500,300,2000,2000,2500,2000,1700,1500",
+                           "0.3%,1.5%,-1%,-2%,1%,2%,4%,6%,5%,-3.5%,-2%,0.5%,-1%,1.5%,-1.5%,1%,-1%,1.5%,3.5%,"
+                           "5.5%,4%,-3%,-1.5%,1%,descent,-0.5%,flat", 111),
+    "col_loop": ("ccw", (562, 876), 48000, 8,
+                 "3000,3000,2500,3000,2500,3000,2500,3000,2500,2500,2000,800,1000,900,1000,800,1000,2000,2000,"
+                 "1500,2500,2500,2500",
+                 "flat,0.8%,-0.5%,1.5%,-1.5%,1%,-1%,2%,-2.5%,0.5%,1.5%,5%,6.5%,5.5%,7%,6%,-2%,-5.5%,-6%,-4%,"
+                 "descent,-0.5%,flat", 336),
+}
+
+
+@pytest.mark.parametrize("name", LONG_LOOPS)
+def test_long_road_race_examples_have_only_fast_corners(name):
+    """Long, untechnical loops for racer's tactics races: no corner tighter than 100 m."""
+    direction, start, lap, road, lengths, grades, top = LONG_LOOPS[name]
+    t = process(EXAMPLES / f"{name}.png",
+                Params(find_paper=False, direction=direction, start=start, length_m=lap, track_width_m=road,
+                       section_lengths_m=[float(v) for v in lengths.split(",")], grades=grades.split(","))
+                ).track
+    prof, m = t.profile, t.m_per_px
+    assert t.reference.min_radius * m > 100 and not t.warnings and not prof.crossings
+    assert np.linalg.norm(t.reference.line(0.0) - start) < 4
+    assert prof.z.max() * m == pytest.approx(top, abs=2) and max(abs(sec.grade) for sec in prof.sections) <= 0.07
+
+
+SPRINTS = {  # name: (direction, start, lap m, road m, section lengths, grades)
+    "sprint_boulevard": ("ccw", (1020, 841), 3500, 12, "500,400,700,800,500,600",
+                         "flat,0.6%,-0.3%,0.4%,descent,flat"),
+    "sprint_seafront": ("ccw", (1250, 734), 5000, 10, "350,450,700,800,900,1800",
+                        "flat,0.8%,0.5%,-0.4%,descent,flat"),
+    "sprint_drag_finish": ("cw", (1232, 125), 6500, 10, "300,1100,1000,1200,900,600,600,500,300",
+                           "flat,-0.8%,-0.3%,0.4%,descent,flat,0.5%,1.2%,1.8%"),
+}
+
+
+@pytest.mark.parametrize("name", SPRINTS)
+def test_sprint_examples_are_flat_with_a_long_run_in(name):
+    """Flat laps for bunch sprints: under 2% everywhere and the last 500 m before the line straight."""
+    direction, start, lap, road, lengths, grades = SPRINTS[name]
+    t = process(EXAMPLES / f"{name}.png",
+                Params(find_paper=False, direction=direction, start=start, length_m=lap, track_width_m=road,
+                       section_lengths_m=[float(v) for v in lengths.split(",")], grades=grades.split(","))
+                ).track
+    prof, ref, m = t.profile, t.reference, t.m_per_px
+    assert not t.warnings and not prof.crossings and ref.min_factor > 0.5
+    assert np.linalg.norm(ref.line(0.0) - start) < 4
+    assert max(abs(sec.grade) for sec in prof.sections) < 0.02
+    run_in = ref.line(ref.u_at(ref.length - np.linspace(0, 500 / m, 50)))
+    heading = np.unwrap(np.arctan2(*np.diff(run_in, axis=0).T[::-1]))
+    assert np.ptp(heading) < np.radians(3)
+
+
+def test_giro_example_takes_the_sections_from_the_legend():
+    """The legend's sections in pitches, with the 1.2 km it leaves out before the Muro del Borgo."""
+    lengths = [1000, 900, 1100, 600, 800, 500, 700, 600, 500, 800, 300, 250, 300, 250, 300, 300, 300, 800, 700,
+               600, 500, 600, 700, 500, 400, 400, 300, 400, 300, 300, 300, 400, 500, 400, 400, 500, 600, 800, 700,
+               500, 400, 400, 400, 400, 200, 200, 200, 200, 500, 500, 500]
+    grades = ("0.2%,-0.3%,0.2%,5%,7%,9%,6%,8.5%,5.5%,8%,2.5%,-3%,3%,-2%,2%,-3%,1.5%,-2%,-5%,-8%,-10%,-7%,-9.5%,"
+              "-6%,descent,0.5%,-0.5%,1%,-0.5%,0.8%,-1%,8%,11%,9%,12.5%,9.5%,-5%,-7.5%,-8%,-6.5%,descent,0.5%,-1%,"
+              "1%,9%,15%,13%,11%,-6%,-9%,descent")
+    t = process(EXAMPLES / "giro_delle_colline.png",
+                Params(find_paper=False, direction="cw", start=(932, 862), length_m=25000, track_width_m=8,
+                       section_lengths_m=lengths, grades=grades.split(","))).track
+    prof, m = t.profile, t.m_per_px
+    assert [sec.length * m for sec in prof.sections] == pytest.approx(lengths, abs=15)
+    assert np.linalg.norm(t.reference.line(0.0) - [932, 862]) < 4 and not prof.crossings and not t.warnings
+    solved = [100 * sec.grade for sec in prof.sections if sec.solved]
+    assert len(solved) == 3 and -8.1 < solved[0] < -7.7 and 320 < prof.z.max() * m < 330
+
+
 def test_add_tick_goes_on_the_line():
     from drawcircuit.pipeline import _add_ticks
 
